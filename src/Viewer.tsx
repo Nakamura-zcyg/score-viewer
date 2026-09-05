@@ -13,20 +13,22 @@ const TAP_MAX_MS = 400;
 const LONG_PRESS_MS = 500;
 // これ以上動いたらタップ／長押しのどちらでもない
 const MOVE_CANCEL_PX = 12;
+// pointerup が来ないままこれ以上経った操作は残骸とみなして捨てる
+const STALE_GESTURE_MS = 3000;
 // 先読みするページ数（前後）
 const PREFETCH = 2;
 // 半ページモード: 上下それぞれが表示するページ高さの割合。0.5 なら重なりなし、0.575 なら 15% 重なる
 const HALF_VIEW_FRACTION = 0.575;
 
 /** 繰りモード。auto は横向きなら half、縦向きなら page */
-type TurnMode = 'auto' | 'page' | 'half';
-type EffectiveMode = 'page' | 'half';
+type TurnMode = 'auto' | 'page' | 'half' | 'width';
+type EffectiveMode = 'page' | 'half' | 'width';
 const MODE_KEY = 'score-viewer.turnMode';
 
 function loadMode(): TurnMode {
   try {
     const v = localStorage.getItem(MODE_KEY);
-    if (v === 'page' || v === 'half' || v === 'auto') return v;
+    if (v === 'page' || v === 'half' || v === 'width' || v === 'auto') return v;
   } catch {
     /* 無視 */
   }
@@ -52,8 +54,12 @@ function computeLayout(
     const scale = Math.min(W / dims.w, H / dims.h);
     return { scale, slices: [0], pageW: dims.w * scale, pageH: dims.h * scale };
   }
+  // width: 横幅いっぱい。縦にはみ出す分はスライスで送る
   // half: 横幅いっぱい、ただし 1 画面がページ高さの HALF_VIEW_FRACTION を超えないよう縮める
-  const scale = Math.min(W / dims.w, H / (HALF_VIEW_FRACTION * dims.h));
+  const scale =
+    mode === 'width'
+      ? W / dims.w
+      : Math.min(W / dims.w, H / (HALF_VIEW_FRACTION * dims.h));
   const pageH = dims.h * scale;
   if (pageH <= H + 0.5) {
     return { scale, slices: [0], pageW: dims.w * scale, pageH };
@@ -63,6 +69,10 @@ function computeLayout(
   const slices: number[] = [];
   for (let i = 0; i < n; i++) slices.push(Math.round((i * (pageH - H)) / (n - 1)));
   return { scale, slices, pageW: dims.w * scale, pageH };
+}
+
+function modeLabel(m: EffectiveMode): string {
+  return m === 'half' ? '半ページ' : m === 'width' ? '横幅いっぱい' : 'ページ全体';
 }
 
 interface Pos {
@@ -289,7 +299,18 @@ export default function Viewer({ doc, onExit }: Props) {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (menuOpen) return;
-    if (gestureRef.current) return; // 2 本目以降は無視
+    const stale = gestureRef.current;
+    if (stale) {
+      // pointerup が来ないまま残った操作は捨てる。そうでなければ 2 本目以降として無視
+      if (performance.now() - stale.t < STALE_GESTURE_MS) return;
+      clearGesture();
+    }
+    // 指が要素外にずれても pointerup / pointercancel が届くようにする
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* 非対応 */
+    }
     const g = {
       id: e.pointerId,
       x: e.clientX,
@@ -326,8 +347,9 @@ export default function Viewer({ doc, onExit }: Props) {
     const el = containerRef.current;
     const w = el?.clientWidth ?? window.innerWidth;
     const h = el?.clientHeight ?? window.innerHeight;
-    // page モード: 左右で判定。half モード: 上下で判定
-    const isPrev = effMode === 'half' ? e.clientY < h / 2 : e.clientX < w / 2;
+    // 縦に分割されているときは上下、そうでなければ左右で判定
+    const vertical = (layoutRef.current?.slices.length ?? 1) > 1;
+    const isPrev = vertical ? e.clientY < h / 2 : e.clientX < w / 2;
     if (isPrev) prev();
     else next();
   };
@@ -422,6 +444,7 @@ export default function Viewer({ doc, onExit }: Props) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onPointerCancel}
     >
       <canvas ref={canvasRef} className="page-canvas" />
 
@@ -467,12 +490,14 @@ export default function Viewer({ doc, onExit }: Props) {
                   onChange={(e) => setModeSetting(e.target.value as TurnMode)}
                 >
                   <option value="auto">自動（横向きで半ページ）</option>
-                  <option value="page">ページ（左右タップ）</option>
+                  <option value="page">ページ全体（左右タップ）</option>
                   <option value="half">半ページ（上下タップ）</option>
+                  <option value="width">横幅いっぱい</option>
                 </select>
               </label>
               <span className="muted-inline">
-                今: {effMode === 'half' ? `半ページ ${sliceCount} 分割` : 'ページ'}
+                今: {modeLabel(effMode)}
+                {sliceCount > 1 ? ` ${sliceCount} 分割・上下タップ` : '・左右タップ'}
               </span>
             </div>
             <div className="row">
