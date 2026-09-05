@@ -10,6 +10,8 @@ export interface DocMeta {
   driveId?: string;
   /** アプリ側で名前を変えて、まだ Drive に押し出していない */
   nameDirty?: boolean;
+  /** 最後に開いた時刻 (ms)。未開封なら undefined */
+  opened?: number;
 }
 
 export interface DocRecord extends DocMeta {
@@ -117,6 +119,13 @@ export function setName(id: number, name: string, dirty: boolean): Promise<void>
     r.name = name;
     if (dirty) r.nameDirty = true;
     else delete r.nameDirty;
+  });
+}
+
+/** 開いた時刻を記録する（「最近開いた順」用） */
+export function touchDoc(id: number): Promise<void> {
+  return patch(id, (r) => {
+    r.opened = Date.now();
   });
 }
 

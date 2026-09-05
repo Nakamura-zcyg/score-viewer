@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getDoc, type DocRecord } from './db.ts';
+import { getDoc, touchDoc, type DocRecord } from './db.ts';
 import Library from './Library.tsx';
 import Viewer from './Viewer.tsx';
 
@@ -11,6 +11,7 @@ export default function App() {
     try {
       const rec = await getDoc(id);
       if (!rec) throw new Error('見つかりません');
+      touchDoc(id).catch(() => undefined);
       setCurrent(rec);
     } catch (e) {
       setError(String(e));

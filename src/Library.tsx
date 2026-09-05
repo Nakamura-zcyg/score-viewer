@@ -1,8 +1,24 @@
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { addDoc, deleteDoc, listDocs, renameDoc, type DocMeta } from './db.ts';
 import { countPages } from './pdf.ts';
 import * as drive from './drive.ts';
 import { syncWithDrive, type SyncProgress } from './sync.ts';
+
+type SortKey = 'added' | 'name' | 'opened';
+const SORT_KEY = 'score-viewer.sort';
+
+function loadSort(): SortKey {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    if (v === 'added' || v === 'name' || v === 'opened') return v;
+  } catch {
+    /* 無視 */
+  }
+  return 'added';
+}
+
+/** 検索用の正規化: 全角半角・大文字小文字の違いを無視する */
+const norm = (s: string) => s.normalize('NFKC').toLowerCase();
 
 function progressText(p: SyncProgress): string {
   switch (p.phase) {
@@ -30,6 +46,34 @@ export default function Library({ onOpen, error, onClearError }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortKey>(loadSort);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SORT_KEY, sort);
+    } catch {
+      /* 無視 */
+    }
+  }, [sort]);
+
+  const shown = useMemo(() => {
+    if (!docs) return null;
+    const q = norm(query.trim());
+    const filtered = q ? docs.filter((d) => norm(d.name).includes(q)) : docs.slice();
+    const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
+    switch (sort) {
+      case 'name':
+        filtered.sort((a, b) => collator.compare(a.name, b.name));
+        break;
+      case 'opened':
+        filtered.sort((a, b) => (b.opened ?? 0) - (a.opened ?? 0) || b.added - a.added);
+        break;
+      default:
+        filtered.sort((a, b) => b.added - a.added);
+    }
+    return filtered;
+  }, [docs, query, sort]);
 
   const refresh = useCallback(async () => setDocs(await listDocs()), []);
 
@@ -128,12 +172,37 @@ export default function Library({ onOpen, error, onClearError }: Props) {
       )}
       {busy && <p className="muted">読み込み中: {busy}</p>}
 
+      {docs && docs.length > 0 && (
+        <div className="toolbar">
+          <input
+            type="search"
+            className="search"
+            placeholder="検索"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="検索"
+          />
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            aria-label="並び順"
+          >
+            <option value="added">追加日順</option>
+            <option value="name">名前順</option>
+            <option value="opened">最近開いた順</option>
+          </select>
+        </div>
+      )}
+
       {docs && docs.length === 0 && (
         <p className="muted">まだ PDF がありません。「PDF を追加」から取り込んでください。</p>
       )}
+      {shown && docs && docs.length > 0 && shown.length === 0 && (
+        <p className="muted">「{query}」に一致する楽譜はありません。</p>
+      )}
 
       <ul className="doc-list">
-        {docs?.map((d) => (
+        {shown?.map((d) => (
           <li key={d.id}>
             <button className="doc" onClick={() => onOpen(d.id)}>
               <span className="name">{d.name}</span>

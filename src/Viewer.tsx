@@ -206,7 +206,7 @@ export default function Viewer({ doc, onExit }: Props) {
       // ページが画面に収まるなら縦中央、収まらないならスライスのオフセット分ずらす
       const y = src.height <= H ? Math.floor((H - src.height) / 2) : -Math.round(offset * dpr);
       ctx.drawImage(src, x, y);
-    });
+    }).catch(() => undefined); // 描画途中で閉じた時の RenderingCancelled は無視
 
     // 先読み: 次 → 前 → 次々 → 前々 の順
     const order: number[] = [];
