@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, LibraryBig, Maximize2, X } from 'lucide-react';
-import { updateLastPage, type DocRecord } from './db.ts';
+import {
+  ChevronLeft,
+  ChevronRight,
+  LibraryBig,
+  Maximize2,
+  Minus,
+  Pause,
+  Play,
+  Plus,
+  X,
+} from 'lucide-react';
+import { setScrollSpeed, updateLastPage, type DocRecord } from './db.ts';
 import { loadPdf, pageSize, renderPage, type PDFDocumentProxy } from './pdf.ts';
+import AutoScroll from './AutoScroll.tsx';
 
 interface Props {
   doc: DocRecord;
@@ -20,20 +31,37 @@ const STALE_GESTURE_MS = 3000;
 const PREFETCH = 2;
 // 半ページモード: 上下それぞれが表示するページ高さの割合。0.5 なら重なりなし、0.575 なら 15% 重なる
 const HALF_VIEW_FRACTION = 0.575;
+// 自動スクロールの速度範囲と既定値 (CSS px/秒)
+const SPEED_MIN = 5;
+const SPEED_MAX = 300;
+const SPEED_DEFAULT = 40;
+const SPEED_STEP = 1.15; // ± ボタン・キーでの倍率
 
 /** 繰りモード。auto は横向きなら half、縦向きなら page */
-type TurnMode = 'auto' | 'page' | 'half' | 'width';
-type EffectiveMode = 'page' | 'half' | 'width';
+type TurnMode = 'auto' | 'page' | 'half' | 'width' | 'scroll';
+type EffectiveMode = 'page' | 'half' | 'width' | 'scroll';
 const MODE_KEY = 'score-viewer.turnMode';
+const SPEED_KEY = 'score-viewer.scrollSpeed';
 
 function loadMode(): TurnMode {
   try {
     const v = localStorage.getItem(MODE_KEY);
-    if (v === 'page' || v === 'half' || v === 'width' || v === 'auto') return v;
+    if (v === 'page' || v === 'half' || v === 'width' || v === 'scroll' || v === 'auto') return v;
   } catch {
     /* 無視 */
   }
   return 'auto';
+}
+
+function loadSpeed(doc: DocRecord): number {
+  if (doc.scrollSpeed) return doc.scrollSpeed;
+  try {
+    const v = Number(localStorage.getItem(SPEED_KEY));
+    if (v >= SPEED_MIN && v <= SPEED_MAX) return v;
+  } catch {
+    /* 無視 */
+  }
+  return SPEED_DEFAULT;
 }
 
 interface Layout {
@@ -46,7 +74,7 @@ interface Layout {
 }
 
 function computeLayout(
-  mode: EffectiveMode,
+  mode: Exclude<EffectiveMode, 'scroll'>,
   size: { w: number; h: number },
   dims: { w: number; h: number },
 ): Layout {
@@ -58,9 +86,7 @@ function computeLayout(
   // width: 横幅いっぱい。縦にはみ出す分はスライスで送る
   // half: 横幅いっぱい、ただし 1 画面がページ高さの HALF_VIEW_FRACTION を超えないよう縮める
   const scale =
-    mode === 'width'
-      ? W / dims.w
-      : Math.min(W / dims.w, H / (HALF_VIEW_FRACTION * dims.h));
+    mode === 'width' ? W / dims.w : Math.min(W / dims.w, H / (HALF_VIEW_FRACTION * dims.h));
   const pageH = dims.h * scale;
   if (pageH <= H + 0.5) {
     return { scale, slices: [0], pageW: dims.w * scale, pageH };
@@ -73,7 +99,16 @@ function computeLayout(
 }
 
 function modeLabel(m: EffectiveMode): string {
-  return m === 'half' ? '半ページ' : m === 'width' ? '横幅いっぱい' : 'ページ全体';
+  switch (m) {
+    case 'half':
+      return '半ページ';
+    case 'width':
+      return '横幅いっぱい';
+    case 'scroll':
+      return '自動スクロール';
+    default:
+      return 'ページ全体';
+  }
 }
 
 interface Pos {
@@ -92,13 +127,18 @@ export default function Viewer({ doc, onExit }: Props) {
   const [indicator, setIndicator] = useState<string | null>(null);
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [modeSetting, setModeSetting] = useState<TurnMode>(loadMode);
+  // 自動スクロール
+  const [running, setRunning] = useState(false);
+  const [speed, setSpeed] = useState(() => loadSpeed(doc));
+  const [jump, setJump] = useState<{ page: number; seq: number } | null>(null);
 
   const effMode: EffectiveMode =
     modeSetting === 'auto' ? (size.w > size.h ? 'half' : 'page') : modeSetting;
+  const isScroll = effMode === 'scroll';
 
   const layout = useMemo(
-    () => (dims ? computeLayout(effMode, size, dims) : null),
-    [effMode, size, dims],
+    () => (dims && !isScroll ? computeLayout(effMode as Exclude<EffectiveMode, 'scroll'>, size, dims) : null),
+    [effMode, isScroll, size, dims],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,7 +187,7 @@ export default function Viewer({ doc, onExit }: Props) {
     setPos((p) => (p.slice === 0 ? p : { ...p, slice: 0 }));
   }, [layout?.scale, effMode]);
 
-  // ---- モード設定の保存 ----
+  // ---- モード設定の保存。スクロール以外に切り替えたら停止 ----
   useEffect(() => {
     try {
       localStorage.setItem(MODE_KEY, modeSetting);
@@ -155,6 +195,20 @@ export default function Viewer({ doc, onExit }: Props) {
       /* 無視 */
     }
   }, [modeSetting]);
+  useEffect(() => {
+    if (!isScroll) setRunning(false);
+  }, [isScroll]);
+
+  // ---- 速度の保存（曲ごと + 次に開く曲の既定値） ----
+  useEffect(() => {
+    try {
+      localStorage.setItem(SPEED_KEY, String(speed));
+    } catch {
+      /* 無視 */
+    }
+    const t = setTimeout(() => setScrollSpeed(doc.id, speed).catch(() => undefined), 500);
+    return () => clearTimeout(t);
+  }, [doc.id, speed]);
 
   // ---- ページ描画（直列キュー） ----
   const getPageCanvas = useCallback(
@@ -183,9 +237,9 @@ export default function Viewer({ doc, onExit }: Props) {
     [pdf, layout],
   );
 
-  // 表示中の位置を display canvas に転写し、前後を先読み
+  // 表示中の位置を display canvas に転写し、前後を先読み（スクロールモードでは AutoScroll が担当）
   useEffect(() => {
-    if (!pdf || !layout) return;
+    if (!pdf || !layout || isScroll) return;
     let alive = true;
     const canvas = canvasRef.current!;
     const dpr = window.devicePixelRatio || 1;
@@ -198,16 +252,18 @@ export default function Viewer({ doc, onExit }: Props) {
     const { page, slice } = pos;
     const offset = layout.slices[Math.min(slice, layout.slices.length - 1)] ?? 0;
 
-    getPageCanvas(page).then((src) => {
-      if (!alive) return;
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, W, H);
-      const x = Math.floor((W - src.width) / 2);
-      // ページが画面に収まるなら縦中央、収まらないならスライスのオフセット分ずらす
-      const y = src.height <= H ? Math.floor((H - src.height) / 2) : -Math.round(offset * dpr);
-      ctx.drawImage(src, x, y);
-    }).catch(() => undefined); // 描画途中で閉じた時の RenderingCancelled は無視
+    getPageCanvas(page)
+      .then((src) => {
+        if (!alive) return;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, H);
+        const x = Math.floor((W - src.width) / 2);
+        // ページが画面に収まるなら縦中央、収まらないならスライスのオフセット分ずらす
+        const y = src.height <= H ? Math.floor((H - src.height) / 2) : -Math.round(offset * dpr);
+        ctx.drawImage(src, x, y);
+      })
+      .catch(() => undefined); // 描画途中で閉じた時の RenderingCancelled は無視
 
     // 先読み: 次 → 前 → 次々 → 前々 の順
     const order: number[] = [];
@@ -225,7 +281,7 @@ export default function Viewer({ doc, onExit }: Props) {
     return () => {
       alive = false;
     };
-  }, [pdf, layout, pos, size, getPageCanvas, doc.pageCount]);
+  }, [pdf, layout, pos, size, getPageCanvas, doc.pageCount, isScroll]);
 
   // ---- 最後に見ていたページを保存 ----
   useEffect(() => {
@@ -259,28 +315,68 @@ export default function Viewer({ doc, onExit }: Props) {
     [describe],
   );
 
+  const jumpToPage = useCallback(
+    (n: number) => {
+      const page = Math.min(Math.max(n, 1), doc.pageCount);
+      setJump((j) => ({ page, seq: (j?.seq ?? 0) + 1 }));
+      setIndicator(`${page} / ${doc.pageCount}`);
+    },
+    [doc.pageCount],
+  );
+
   const next = useCallback(() => {
     const cur = posRef.current;
+    if (isScroll) return jumpToPage(cur.page + 1);
     const n = layoutRef.current?.slices.length ?? 1;
     if (cur.slice + 1 < n) return moveTo({ page: cur.page, slice: cur.slice + 1 });
     if (cur.page < doc.pageCount) return moveTo({ page: cur.page + 1, slice: 0 });
     setIndicator('最後のページ');
-  }, [doc.pageCount, moveTo]);
+  }, [doc.pageCount, moveTo, isScroll, jumpToPage]);
 
   const prev = useCallback(() => {
     const cur = posRef.current;
+    if (isScroll) return jumpToPage(cur.page - 1);
     const n = layoutRef.current?.slices.length ?? 1;
     if (cur.slice > 0) return moveTo({ page: cur.page, slice: cur.slice - 1 });
     if (cur.page > 1) return moveTo({ page: cur.page - 1, slice: n - 1 });
     setIndicator('最初のページ');
-  }, [moveTo]);
+  }, [moveTo, isScroll, jumpToPage]);
 
   const goToPage = useCallback(
-    (n: number) => moveTo({ page: Math.min(Math.max(n, 1), doc.pageCount), slice: 0 }),
-    [doc.pageCount, moveTo],
+    (n: number) => {
+      if (isScroll) return jumpToPage(n);
+      moveTo({ page: Math.min(Math.max(n, 1), doc.pageCount), slice: 0 });
+    },
+    [doc.pageCount, moveTo, isScroll, jumpToPage],
   );
 
-  // ---- タップ／長押し判定 ----
+  // ---- 自動スクロールの操作 ----
+  const runningRef = useRef(running);
+  runningRef.current = running;
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
+  const toggleRunning = useCallback(() => {
+    const next = !runningRef.current;
+    runningRef.current = next;
+    setRunning(next);
+    setIndicator(next ? '再生' : '停止');
+  }, []);
+  const changeSpeed = useCallback((factor: number) => {
+    const v = Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, speedRef.current * factor)));
+    speedRef.current = v;
+    setSpeed(v);
+    setIndicator(`${v} px/秒`);
+  }, []);
+  const onScrollEnd = useCallback(() => {
+    setRunning(false);
+    setIndicator('最後まで到達');
+  }, []);
+  const onScrollPage = useCallback((page: number) => {
+    setPos((p) => (p.page === page ? p : { page, slice: 0 }));
+  }, []);
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+
+  // ---- タップ／長押し判定（ページ・半ページ・横幅モード） ----
   const gestureRef = useRef<{
     id: number;
     x: number;
@@ -363,6 +459,37 @@ export default function Viewer({ doc, onExit }: Props) {
         if (e.key === 'Escape') setMenuOpen(false);
         return;
       }
+      if (isScroll) {
+        switch (e.key) {
+          case ' ':
+          case 'Enter':
+            e.preventDefault();
+            toggleRunning();
+            break;
+          case 'ArrowUp':
+          case 'ArrowRight':
+            e.preventDefault();
+            changeSpeed(SPEED_STEP);
+            break;
+          case 'ArrowDown':
+          case 'ArrowLeft':
+            e.preventDefault();
+            changeSpeed(1 / SPEED_STEP);
+            break;
+          case 'PageDown':
+            e.preventDefault();
+            next();
+            break;
+          case 'PageUp':
+            e.preventDefault();
+            prev();
+            break;
+          case 'Escape':
+            setMenuOpen(true);
+            break;
+        }
+        return;
+      }
       switch (e.key) {
         case 'ArrowRight':
         case 'ArrowDown':
@@ -386,7 +513,7 @@ export default function Viewer({ doc, onExit }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen, next, prev]);
+  }, [menuOpen, next, prev, isScroll, toggleRunning, changeSpeed]);
 
   // ---- 画面消灯防止 ----
   useEffect(() => {
@@ -426,18 +553,43 @@ export default function Viewer({ doc, onExit }: Props) {
   };
 
   const sliceCount = layout?.slices.length ?? 1;
+  const tapHint = isScroll
+    ? 'タップで再生/停止・ドラッグで移動'
+    : sliceCount > 1
+      ? `${sliceCount} 分割・上下タップ`
+      : '左右タップ';
+
+  const pointerProps = isScroll
+    ? {}
+    : {
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel,
+        onLostPointerCapture: onPointerCancel,
+      };
 
   return (
-    <div
-      ref={containerRef}
-      className="viewer"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      onLostPointerCapture={onPointerCancel}
-    >
-      <canvas ref={canvasRef} className="page-canvas" />
+    <div ref={containerRef} className="viewer" {...pointerProps}>
+      {isScroll && pdf && dims ? (
+        <AutoScroll
+          pdf={pdf}
+          pageCount={doc.pageCount}
+          dims={dims}
+          size={size}
+          startPage={pos.page}
+          jump={jump}
+          running={running}
+          speed={speed}
+          onToggle={toggleRunning}
+          onEnd={onScrollEnd}
+          onPage={onScrollPage}
+          onLongPress={openMenu}
+          menuOpen={menuOpen}
+        />
+      ) : (
+        <canvas ref={canvasRef} className="page-canvas" />
+      )}
 
       {!pdf && <div className="center muted">読み込み中…</div>}
 
@@ -485,13 +637,54 @@ export default function Viewer({ doc, onExit }: Props) {
                   <option value="page">ページ全体（左右タップ）</option>
                   <option value="half">半ページ（上下タップ）</option>
                   <option value="width">横幅いっぱい</option>
+                  <option value="scroll">自動スクロール</option>
                 </select>
               </label>
               <span className="muted-inline">
-                今: {modeLabel(effMode)}
-                {sliceCount > 1 ? ` ${sliceCount} 分割・上下タップ` : '・左右タップ'}
+                今: {modeLabel(effMode)}・{tapHint}
               </span>
             </div>
+            {isScroll && (
+              <div className="row">
+                <button
+                  className="btn icon"
+                  onClick={() => {
+                    toggleRunning();
+                    setMenuOpen(false);
+                  }}
+                  aria-label={running ? '停止' : '再生'}
+                  title={running ? '停止' : '再生'}
+                >
+                  {running ? <Pause size={22} /> : <Play size={22} />}
+                </button>
+                <button
+                  className="btn icon"
+                  onClick={() => changeSpeed(1 / SPEED_STEP)}
+                  aria-label="遅く"
+                  title="遅く"
+                >
+                  <Minus size={20} />
+                </button>
+                <input
+                  type="range"
+                  min={SPEED_MIN}
+                  max={SPEED_MAX}
+                  step={1}
+                  value={speed}
+                  onChange={(e) => setSpeed(Number(e.target.value))}
+                  aria-label="スクロール速度"
+                />
+                <button
+                  className="btn icon"
+                  onClick={() => changeSpeed(SPEED_STEP)}
+                  aria-label="速く"
+                  title="速く"
+                >
+                  <Plus size={20} />
+                </button>
+                <span className="speed">{speed} px/秒</span>
+              </div>
+            )}
             <div className="row">
               <button className="btn with-icon" onClick={toggleFullscreen}>
                 <Maximize2 size={20} /> 全画面切替

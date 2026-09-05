@@ -47,7 +47,9 @@ export async function renderPage(
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  // intent 'print': pdf.js は表示用描画を requestAnimationFrame で進めるため、
+  // タブが裏に回っている間は完了しない。印刷用は rAF を使わないので先読みが止まらない。
+  await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
   page.cleanup();
   return canvas;
 }

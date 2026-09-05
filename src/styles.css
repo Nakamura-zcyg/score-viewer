@@ -210,6 +210,44 @@ body,
   display: block;
   pointer-events: none;
 }
+.autoscroll {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+}
+.autoscroll .strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  will-change: transform;
+}
+.autoscroll .page-slot {
+  position: absolute;
+  left: 0;
+  background: #fff;
+}
+.autoscroll .page-slot canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.autoscroll .page-placeholder {
+  width: 100%;
+  height: 100%;
+  background: #222;
+}
+.panel input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+}
+.panel .speed {
+  min-width: 5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .center {
   position: absolute;
   inset: 0;
