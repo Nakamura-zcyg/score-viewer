@@ -6,6 +6,10 @@ export interface DocMeta {
   pageCount: number;
   lastPage: number;
   added: number;
+  /** Drive 上のファイル id。未同期なら undefined */
+  driveId?: string;
+  /** アプリ側で名前を変えて、まだ Drive に押し出していない */
+  nameDirty?: boolean;
 }
 
 export interface DocRecord extends DocMeta {
@@ -62,10 +66,16 @@ export async function listDocs(): Promise<DocMeta[]> {
   return out.sort((a, b) => b.added - a.added);
 }
 
-export async function addDoc(name: string, data: ArrayBuffer, pageCount: number): Promise<number> {
+export async function addDoc(
+  name: string,
+  data: ArrayBuffer,
+  pageCount: number,
+  driveId?: string,
+): Promise<number> {
   const db = await openDB();
   const t = db.transaction(STORE, 'readwrite');
   const rec: Omit<DocRecord, 'id'> = { name, data, pageCount, lastPage: 1, added: Date.now() };
+  if (driveId) rec.driveId = driveId;
   const id = await request(t.objectStore(STORE).add(rec));
   await done(t);
   return id as number;
@@ -79,28 +89,41 @@ export async function getDoc(id: number): Promise<DocRecord | undefined> {
   return rec as DocRecord | undefined;
 }
 
-export async function updateLastPage(id: number, lastPage: number): Promise<void> {
+async function patch(id: number, fn: (rec: DocRecord) => void): Promise<void> {
   const db = await openDB();
   const t = db.transaction(STORE, 'readwrite');
   const s = t.objectStore(STORE);
   const rec = (await request(s.get(id))) as DocRecord | undefined;
   if (rec) {
-    rec.lastPage = lastPage;
+    fn(rec);
     s.put(rec);
   }
   await done(t);
 }
 
-export async function renameDoc(id: number, name: string): Promise<void> {
-  const db = await openDB();
-  const t = db.transaction(STORE, 'readwrite');
-  const s = t.objectStore(STORE);
-  const rec = (await request(s.get(id))) as DocRecord | undefined;
-  if (rec) {
-    rec.name = name;
-    s.put(rec);
-  }
-  await done(t);
+export function updateLastPage(id: number, lastPage: number): Promise<void> {
+  return patch(id, (r) => {
+    r.lastPage = lastPage;
+  });
+}
+
+/** ユーザー操作での名前変更。Drive へ未反映の印を付ける */
+export function renameDoc(id: number, name: string): Promise<void> {
+  return setName(id, name, true);
+}
+
+export function setName(id: number, name: string, dirty: boolean): Promise<void> {
+  return patch(id, (r) => {
+    r.name = name;
+    if (dirty) r.nameDirty = true;
+    else delete r.nameDirty;
+  });
+}
+
+export function linkDrive(id: number, driveId: string): Promise<void> {
+  return patch(id, (r) => {
+    r.driveId = driveId;
+  });
 }
 
 export async function deleteDoc(id: number): Promise<void> {

@@ -43,6 +43,15 @@ body,
   top: 0;
   background: var(--bg);
 }
+.library .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sync-msg {
+  padding: 10px 16px;
+  border-bottom: 1px solid #222;
+}
 .library h1 {
   font-size: 18px;
   margin: 0;
