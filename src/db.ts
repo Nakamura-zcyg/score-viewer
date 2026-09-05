@@ -91,6 +91,18 @@ export async function updateLastPage(id: number, lastPage: number): Promise<void
   await done(t);
 }
 
+export async function renameDoc(id: number, name: string): Promise<void> {
+  const db = await openDB();
+  const t = db.transaction(STORE, 'readwrite');
+  const s = t.objectStore(STORE);
+  const rec = (await request(s.get(id))) as DocRecord | undefined;
+  if (rec) {
+    rec.name = name;
+    s.put(rec);
+  }
+  await done(t);
+}
+
 export async function deleteDoc(id: number): Promise<void> {
   const db = await openDB();
   const t = db.transaction(STORE, 'readwrite');

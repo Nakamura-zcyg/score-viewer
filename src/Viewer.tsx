@@ -89,7 +89,6 @@ export default function Viewer({ doc, onExit }: Props) {
   }));
   const [menuOpen, setMenuOpen] = useState(false);
   const [indicator, setIndicator] = useState<string | null>(null);
-  const [gotoValue, setGotoValue] = useState('');
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [modeSetting, setModeSetting] = useState<TurnMode>(loadMode);
 
@@ -425,15 +424,6 @@ export default function Viewer({ doc, onExit }: Props) {
     }
   };
 
-  const submitGoto = () => {
-    const n = parseInt(gotoValue, 10);
-    if (Number.isFinite(n)) {
-      goToPage(n);
-      setGotoValue('');
-      setMenuOpen(false);
-    }
-  };
-
   const sliceCount = layout?.slices.length ?? 1;
 
   return (
@@ -468,19 +458,20 @@ export default function Viewer({ doc, onExit }: Props) {
             <div className="row">
               <label>
                 ページへ移動{' '}
-                <input
-                  type="number"
-                  min={1}
-                  max={doc.pageCount}
-                  inputMode="numeric"
-                  value={gotoValue}
-                  onChange={(e) => setGotoValue(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && submitGoto()}
-                />
+                <select
+                  value={pos.page}
+                  onChange={(e) => {
+                    goToPage(parseInt(e.target.value, 10));
+                    setMenuOpen(false);
+                  }}
+                >
+                  {Array.from({ length: doc.pageCount }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} / {doc.pageCount}
+                    </option>
+                  ))}
+                </select>
               </label>
-              <button className="btn" onClick={submitGoto}>
-                移動
-              </button>
             </div>
             <div className="row">
               <label>

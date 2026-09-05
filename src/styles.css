@@ -122,6 +122,11 @@ body,
   color: #e88;
   align-self: center;
 }
+.btn.small {
+  padding: 8px 10px;
+  align-self: center;
+  white-space: nowrap;
+}
 .btn.wide {
   flex: 1;
 }
@@ -195,15 +200,6 @@ body,
 .panel .title {
   font-weight: 600;
   word-break: break-all;
-}
-.panel input[type='number'] {
-  width: 5em;
-  font: inherit;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid #444;
-  background: #111;
-  color: var(--fg);
 }
 
 .panel select {

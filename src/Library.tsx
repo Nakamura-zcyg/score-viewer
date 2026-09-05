@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
-import { addDoc, deleteDoc, listDocs, type DocMeta } from './db.ts';
+import { addDoc, deleteDoc, listDocs, renameDoc, type DocMeta } from './db.ts';
 import { countPages } from './pdf.ts';
 
 interface Props {
@@ -32,6 +32,15 @@ export default function Library({ onOpen, error, onClearError }: Props) {
       }
     }
     setBusy(null);
+    refresh();
+  };
+
+  const onRename = async (d: DocMeta) => {
+    const name = prompt('新しい名前', d.name);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === d.name) return;
+    await renameDoc(d.id, trimmed);
     refresh();
   };
 
@@ -71,7 +80,10 @@ export default function Library({ onOpen, error, onClearError }: Props) {
                 {d.pageCount} ページ · 前回 p.{d.lastPage}
               </span>
             </button>
-            <button className="btn danger" onClick={() => onDelete(d)} aria-label="削除">
+            <button className="btn small" onClick={() => onRename(d)} aria-label="名前変更">
+              名前
+            </button>
+            <button className="btn danger small" onClick={() => onDelete(d)} aria-label="削除">
               削除
             </button>
           </li>
@@ -79,7 +91,7 @@ export default function Library({ onOpen, error, onClearError }: Props) {
       </ul>
 
       <p className="muted small">
-        ビューア内: 左半分タップで前へ、右半分タップで次へ、長押しでメニュー。
+        ビューア内: 画面の右（または下）をタップで次へ、左（または上）で前へ、長押しでメニュー。
       </p>
     </section>
   );
