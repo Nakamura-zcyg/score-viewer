@@ -12,6 +12,8 @@ export interface DocMeta {
   nameDirty?: boolean;
   /** 最後に開いた時刻 (ms)。未開封なら undefined */
   opened?: number;
+  /** リンク先のファイルが Drive 上に見つからない（他の端末で削除された） */
+  driveMissing?: boolean;
 }
 
 export interface DocRecord extends DocMeta {
@@ -132,6 +134,14 @@ export function touchDoc(id: number): Promise<void> {
 export function linkDrive(id: number, driveId: string): Promise<void> {
   return patch(id, (r) => {
     r.driveId = driveId;
+    delete r.driveMissing;
+  });
+}
+
+export function markDriveMissing(id: number, missing: boolean): Promise<void> {
+  return patch(id, (r) => {
+    if (missing) r.driveMissing = true;
+    else delete r.driveMissing;
   });
 }
 

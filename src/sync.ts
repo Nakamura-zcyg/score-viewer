@@ -1,8 +1,19 @@
-// ローカル (IndexedDB) と Drive のフォルダを突き合わせる。
-//   - ローカルにあって Drive にない → アップロード
-//   - Drive にあってローカルにない → ダウンロード
-//   - 両方にある → 名前をそろえる（アプリで変えた名前は押し出す。それ以外は Drive を正とする）
-import { addDoc, getDoc, linkDrive, listDocs, setName, type DocMeta } from './db.ts';
+// ローカル (IndexedDB) と Drive のフォルダの突き合わせ。アップロードとダウンロードは別操作。
+//
+//   アップロード: ローカルにあって Drive にない → 上げる。アプリで変えた名前 → Drive に反映
+//   ダウンロード: Drive にあってローカルにない → 降ろす。リンク済みの名前は Drive を正とする
+//
+// リンク済みなのに Drive 側にファイルがないものは「他の端末で削除済み」とみなし、
+// 再アップロードはしない（しないと、削除がデバイス間で永遠に往復する。user 指摘 2026-09-06）。
+import {
+  addDoc,
+  getDoc,
+  linkDrive,
+  listDocs,
+  markDriveMissing,
+  setName,
+  type DocMeta,
+} from './db.ts';
 import * as drive from './drive.ts';
 import { countPages } from './pdf.ts';
 
@@ -13,8 +24,14 @@ export interface SyncProgress {
   name?: string;
 }
 
-export interface SyncResult {
+export interface UploadResult {
   uploaded: number;
+  renamed: number;
+  /** Drive 側で消えていたため上げなかった数 */
+  skippedMissing: number;
+}
+
+export interface DownloadResult {
   downloaded: number;
   renamed: number;
 }
@@ -22,22 +39,43 @@ export interface SyncResult {
 const stripPdf = (n: string) => n.replace(/\.pdf$/i, '');
 const withPdf = (n: string) => `${n}.pdf`;
 
-export async function syncWithDrive(onProgress: (p: SyncProgress) => void): Promise<SyncResult> {
-  const result: SyncResult = { uploaded: 0, downloaded: 0, renamed: 0 };
+interface Snapshot {
+  folderId: string;
+  remote: drive.RemoteFile[];
+  remoteById: Map<string, drive.RemoteFile>;
+  local: DocMeta[];
+}
 
+/** 認証 → フォルダ → 一覧取得。リンク切れの印もここで更新する */
+async function snapshot(onProgress: (p: SyncProgress) => void): Promise<Snapshot> {
   onProgress({ phase: 'auth' });
   await drive.getToken();
-
   onProgress({ phase: 'list' });
   const folderId = await drive.ensureFolder();
   const remote = await drive.listFiles(folderId);
-  const local = await listDocs();
-
   const remoteById = new Map(remote.map((f) => [f.id, f]));
-  const linkedIds = new Set(local.map((d) => d.driveId).filter(Boolean) as string[]);
+  const local = await listDocs();
+  for (const d of local) {
+    if (!d.driveId) continue;
+    const missing = !remoteById.has(d.driveId);
+    if (missing !== Boolean(d.driveMissing)) {
+      await markDriveMissing(d.id, missing);
+      d.driveMissing = missing;
+    }
+  }
+  return { folderId, remote, remoteById, local };
+}
 
-  // 1) 未リンクのローカル: 同名の Drive ファイルがあればリンク、なければアップロード
-  const unlinked = local.filter((d) => !d.driveId || !remoteById.has(d.driveId));
+export async function uploadToDrive(onProgress: (p: SyncProgress) => void): Promise<UploadResult> {
+  const result: UploadResult = { uploaded: 0, renamed: 0, skippedMissing: 0 };
+  const { folderId, remote, remoteById, local } = await snapshot(onProgress);
+  const linkedIds = new Set(
+    local.filter((d) => d.driveId && remoteById.has(d.driveId)).map((d) => d.driveId as string),
+  );
+
+  // 1) 未リンク: 同名の Drive ファイルがあればリンク、なければアップロード
+  const unlinked = local.filter((d) => !d.driveId);
+  result.skippedMissing = local.filter((d) => d.driveId && !remoteById.has(d.driveId)).length;
   for (let i = 0; i < unlinked.length; i++) {
     const d = unlinked[i];
     onProgress({ phase: 'upload', current: i + 1, total: unlinked.length, name: d.name });
@@ -55,25 +93,42 @@ export async function syncWithDrive(onProgress: (p: SyncProgress) => void): Prom
     result.uploaded++;
   }
 
-  // 2) リンク済み: 名前の同期
-  for (const d of local as DocMeta[]) {
-    if (!d.driveId) continue;
+  // 2) アプリで変えた名前を Drive に反映
+  for (const d of local) {
+    if (!d.driveId || !d.nameDirty) continue;
+    const f = remoteById.get(d.driveId);
+    if (!f) continue;
+    if (stripPdf(f.name) !== d.name) {
+      await drive.rename(f.id, withPdf(d.name));
+      result.renamed++;
+    }
+    await setName(d.id, d.name, false);
+  }
+
+  onProgress({ phase: 'done' });
+  return result;
+}
+
+export async function downloadFromDrive(
+  onProgress: (p: SyncProgress) => void,
+): Promise<DownloadResult> {
+  const result: DownloadResult = { downloaded: 0, renamed: 0 };
+  const { remote, remoteById, local } = await snapshot(onProgress);
+  const linkedIds = new Set(local.map((d) => d.driveId).filter(Boolean) as string[]);
+
+  // 1) リンク済み: Drive 側の名前を取り込む（アプリで変えて未反映のものは触らない）
+  for (const d of local) {
+    if (!d.driveId || d.nameDirty) continue;
     const f = remoteById.get(d.driveId);
     if (!f) continue;
     const remoteName = stripPdf(f.name);
-    if (d.nameDirty) {
-      if (remoteName !== d.name) {
-        await drive.rename(f.id, withPdf(d.name));
-        result.renamed++;
-      }
-      await setName(d.id, d.name, false);
-    } else if (remoteName !== d.name) {
+    if (remoteName !== d.name) {
       await setName(d.id, remoteName, false);
       result.renamed++;
     }
   }
 
-  // 3) Drive にだけあるもの: ダウンロード
+  // 2) Drive にだけあるもの: ダウンロード
   const missing = remote.filter((f) => !linkedIds.has(f.id));
   for (let i = 0; i < missing.length; i++) {
     const f = missing[i];

@@ -62,11 +62,23 @@ body,
   padding: 10px 16px;
   border-bottom: 1px solid #222;
 }
-.toolbar .search {
+.toolbar .search-wrap {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+.toolbar .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.toolbar .search {
+  width: 100%;
   font: inherit;
-  padding: 10px 12px;
+  padding: 10px 12px 10px 36px;
   border-radius: 8px;
   border: 1px solid #444;
   background: #111;
@@ -159,6 +171,27 @@ body,
   padding: 8px 10px;
   align-self: center;
   white-space: nowrap;
+}
+.btn.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.btn.icon.danger {
+  align-self: center;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn.wide {
   flex: 1;

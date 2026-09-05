@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, LibraryBig, Maximize2, X } from 'lucide-react';
 import { updateLastPage, type DocRecord } from './db.ts';
 import { loadPdf, pageSize, renderPage, type PDFDocumentProxy } from './pdf.ts';
 
@@ -447,12 +448,12 @@ export default function Viewer({ doc, onExit }: Props) {
           <div className="panel">
             <div className="row title">{doc.name}</div>
             <div className="row">
-              <button className="btn" onClick={prev}>
-                ◀ 前
+              <button className="btn icon" onClick={prev} aria-label="前へ" title="前へ">
+                <ChevronLeft size={24} />
               </button>
               <span>{describe(pos)}</span>
-              <button className="btn" onClick={next}>
-                次 ▶
+              <button className="btn icon" onClick={next} aria-label="次へ" title="次へ">
+                <ChevronRight size={24} />
               </button>
             </div>
             <div className="row">
@@ -492,16 +493,16 @@ export default function Viewer({ doc, onExit }: Props) {
               </span>
             </div>
             <div className="row">
-              <button className="btn" onClick={toggleFullscreen}>
-                全画面切替
+              <button className="btn with-icon" onClick={toggleFullscreen}>
+                <Maximize2 size={20} /> 全画面切替
               </button>
-              <button className="btn" onClick={onExit}>
-                ライブラリへ戻る
+              <button className="btn with-icon" onClick={onExit}>
+                <LibraryBig size={20} /> ライブラリ
               </button>
             </div>
             <div className="row">
-              <button className="btn primary wide" onClick={() => setMenuOpen(false)}>
-                閉じる
+              <button className="btn primary wide with-icon" onClick={() => setMenuOpen(false)}>
+                <X size={20} /> 閉じる
               </button>
             </div>
           </div>
