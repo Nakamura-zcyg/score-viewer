@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { CloudDownload, CloudUpload, FilePlus, Pencil, Search, Trash2 } from 'lucide-react';
+import { CloudDownload, CloudUpload, FilePlus, Search, TextCursorInput, Trash2 } from 'lucide-react';
 import { addDoc, deleteDoc, listDocs, renameDoc, type DocMeta } from './db.ts';
 import { countPages } from './pdf.ts';
 import * as drive from './drive.ts';
@@ -263,7 +263,7 @@ export default function Library({ onOpen, error, onClearError }: Props) {
               aria-label="名前変更"
               title="名前変更"
             >
-              <Pencil size={ICON} />
+              <TextCursorInput size={ICON} />
             </button>
             <button
               className="btn icon danger"
