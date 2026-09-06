@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getDoc, touchDoc, type DocRecord } from './db.ts';
+import { getDoc, getVideo, touchDoc, touchVideo, type DocRecord, type VideoMeta } from './db.ts';
 import Library from './Library.tsx';
 import Viewer from './Viewer.tsx';
+import VideoPlayer from './VideoPlayer.tsx';
+
+type Current = { kind: 'pdf'; doc: DocRecord } | { kind: 'video'; video: VideoMeta } | null;
 
 export default function App() {
-  const [current, setCurrent] = useState<DocRecord | null>(null);
+  const [current, setCurrent] = useState<Current>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -25,7 +28,18 @@ export default function App() {
       const rec = await getDoc(id);
       if (!rec) throw new Error('見つかりません');
       touchDoc(id).catch(() => undefined);
-      setCurrent(rec);
+      setCurrent({ kind: 'pdf', doc: rec });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  const openVideo = useCallback(async (id: number) => {
+    try {
+      const v = await getVideo(id);
+      if (!v) throw new Error('見つかりません');
+      touchVideo(id).catch(() => undefined);
+      setCurrent({ kind: 'video', video: v });
     } catch (e) {
       setError(String(e));
     }
@@ -37,7 +51,7 @@ export default function App() {
     else setCurrent(null);
   }, []);
 
-  // Android の戻るボタンでビューアからライブラリへ戻れるように history を 1 段積む
+  // Android の戻るボタンでライブラリへ戻れるように history を 1 段積む
   useEffect(() => {
     if (!current) return;
     history.pushState({ viewer: true }, '');
@@ -48,10 +62,17 @@ export default function App() {
 
   return (
     <>
-      {current ? (
-        <Viewer doc={current} onExit={exit} />
+      {current?.kind === 'pdf' ? (
+        <Viewer doc={current.doc} onExit={exit} />
+      ) : current?.kind === 'video' ? (
+        <VideoPlayer video={current.video} onExit={exit} />
       ) : (
-        <Library onOpen={open} error={error} onClearError={() => setError(null)} />
+        <Library
+          onOpen={open}
+          onOpenVideo={openVideo}
+          error={error}
+          onClearError={() => setError(null)}
+        />
       )}
       {toast && <div className="toast">{toast}</div>}
     </>

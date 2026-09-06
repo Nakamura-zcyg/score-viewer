@@ -1,15 +1,41 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { CloudDownload, CloudUpload, FilePlus, Search, TextCursorInput, Trash2 } from 'lucide-react';
-import { addDoc, deleteDoc, listDocs, renameDoc, type DocMeta } from './db.ts';
+import {
+  CloudDownload,
+  CloudUpload,
+  FilePlus,
+  Search,
+  TextCursorInput,
+  Trash2,
+  MonitorPlay,
+} from 'lucide-react';
+import {
+  addDoc,
+  addVideo,
+  deleteDoc,
+  deleteVideo,
+  listDocs,
+  listVideos,
+  renameDoc,
+  renameVideo,
+  type DocMeta,
+  type VideoMeta,
+} from './db.ts';
+import { extractVideoId, fetchTitle } from './youtube.ts';
 import { countPages } from './pdf.ts';
 import * as drive from './drive.ts';
 import { downloadFromDrive, uploadToDrive, type SyncProgress } from './sync.ts';
 
 interface Props {
   onOpen: (id: number) => void;
+  onOpenVideo: (id: number) => void;
   error: string | null;
   onClearError: () => void;
 }
+
+/** 一覧の 1 行。PDF と動画を同じ並びで扱う */
+type Item =
+  | { kind: 'pdf'; key: string; name: string; added: number; opened?: number; doc: DocMeta }
+  | { kind: 'video'; key: string; name: string; added: number; opened?: number; video: VideoMeta };
 
 type SortKey = 'added' | 'name' | 'opened';
 const SORT_KEY = 'score-viewer.sort';
@@ -44,15 +70,26 @@ function progressText(p: SyncProgress): string {
 
 const ICON = 22;
 
-export default function Library({ onOpen, error, onClearError }: Props) {
+function formatTime(sec: number): string {
+  const s = Math.floor(sec);
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+export default function Library({ onOpen, onOpenVideo, error, onClearError }: Props) {
   const [docs, setDocs] = useState<DocMeta[] | null>(null);
+  const [videos, setVideos] = useState<VideoMeta[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>(loadSort);
 
-  const refresh = useCallback(async () => setDocs(await listDocs()), []);
+  const refresh = useCallback(async () => {
+    const [d, v] = await Promise.all([listDocs(), listVideos().catch(() => [] as VideoMeta[])]);
+    setDocs(d);
+    setVideos(v);
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -66,10 +103,31 @@ export default function Library({ onOpen, error, onClearError }: Props) {
     }
   }, [sort]);
 
-  const shown = useMemo(() => {
+  const items = useMemo<Item[] | null>(() => {
     if (!docs) return null;
+    const a: Item[] = docs.map((d) => ({
+      kind: 'pdf',
+      key: `p${d.id}`,
+      name: d.name,
+      added: d.added,
+      opened: d.opened,
+      doc: d,
+    }));
+    const b: Item[] = videos.map((v) => ({
+      kind: 'video',
+      key: `v${v.id}`,
+      name: v.name,
+      added: v.added,
+      opened: v.opened,
+      video: v,
+    }));
+    return a.concat(b);
+  }, [docs, videos]);
+
+  const shown = useMemo(() => {
+    if (!items) return null;
     const q = norm(query.trim());
-    const filtered = q ? docs.filter((d) => norm(d.name).includes(q)) : docs.slice();
+    const filtered = q ? items.filter((d) => norm(d.name).includes(q)) : items.slice();
     const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
     switch (sort) {
       case 'name':
@@ -82,7 +140,7 @@ export default function Library({ onOpen, error, onClearError }: Props) {
         filtered.sort((a, b) => b.added - a.added);
     }
     return filtered;
-  }, [docs, query, sort]);
+  }, [items, query, sort]);
 
   const onFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -107,6 +165,44 @@ export default function Library({ onOpen, error, onClearError }: Props) {
     const trimmed = name.trim();
     if (!trimmed || trimmed === d.name) return;
     await renameDoc(d.id, trimmed);
+    refresh();
+  };
+
+  // ---- 動画 ----
+  const onAddVideo = async () => {
+    const url = prompt('YouTube の URL（共有リンクでも可）');
+    if (url === null) return;
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+      alert('YouTube の動画 URL として読めませんでした。');
+      return;
+    }
+    if (videos.some((v) => v.videoId === videoId)) {
+      alert('この動画は追加済みです。');
+      return;
+    }
+    setBusy('タイトルを取得中…');
+    const title = await fetchTitle(videoId);
+    setBusy(null);
+    const name = prompt('名前', title ?? '');
+    if (name === null) return;
+    const trimmed = name.trim() || title || videoId;
+    await addVideo(trimmed, videoId, url.trim());
+    refresh();
+  };
+
+  const onRenameVideo = async (v: VideoMeta) => {
+    const name = prompt('新しい名前', v.name);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === v.name) return;
+    await renameVideo(v.id, trimmed);
+    refresh();
+  };
+
+  const onDeleteVideo = async (v: VideoMeta) => {
+    if (!confirm(`「${v.name}」を一覧から削除しますか？`)) return;
+    await deleteVideo(v.id);
     refresh();
   };
 
@@ -194,6 +290,14 @@ export default function Library({ onOpen, error, onClearError }: Props) {
               </button>
             </>
           )}
+          <button
+            className="btn icon"
+            onClick={onAddVideo}
+            aria-label="YouTube 動画を追加"
+            title="YouTube 動画を追加"
+          >
+            <MonitorPlay size={ICON} />
+          </button>
           <label className="btn icon primary" aria-label="PDF を追加" title="PDF を追加">
             <FilePlus size={ICON} />
             <input type="file" accept="application/pdf,.pdf" multiple hidden onChange={onFiles} />
@@ -214,7 +318,7 @@ export default function Library({ onOpen, error, onClearError }: Props) {
       )}
       {busy && <p className="muted">読み込み中: {busy}</p>}
 
-      {docs && docs.length > 0 && (
+      {items && items.length > 0 && (
         <div className="toolbar">
           <div className="search-wrap">
             <Search size={18} className="search-icon" aria-hidden />
@@ -239,42 +343,75 @@ export default function Library({ onOpen, error, onClearError }: Props) {
         </div>
       )}
 
-      {docs && docs.length === 0 && (
-        <p className="muted">まだ PDF がありません。右上の＋から取り込んでください。</p>
+      {items && items.length === 0 && (
+        <p className="muted">
+          まだ何もありません。右上の＋で PDF を取り込むか、YouTube アイコンで動画を追加してください。
+        </p>
       )}
-      {shown && docs && docs.length > 0 && shown.length === 0 && (
-        <p className="muted">「{query}」に一致する楽譜はありません。</p>
+      {shown && items && items.length > 0 && shown.length === 0 && (
+        <p className="muted">「{query}」に一致する項目はありません。</p>
       )}
 
       <ul className="doc-list">
-        {shown?.map((d) => (
-          <li key={d.id}>
-            <button className="doc" onClick={() => onOpen(d.id)}>
-              <span className="name">{d.name}</span>
-              <span className="meta">
-                {d.pageCount} ページ · 前回 p.{d.lastPage}
-                {d.driveId ? (d.driveMissing ? ' · Drive で削除済み' : ' · Drive') : ''}
-                {d.nameDirty ? '（名前変更を未同期）' : ''}
-              </span>
-            </button>
-            <button
-              className="btn icon"
-              onClick={() => onRename(d)}
-              aria-label="名前変更"
-              title="名前変更"
-            >
-              <TextCursorInput size={ICON} />
-            </button>
-            <button
-              className="btn icon danger"
-              onClick={() => onDelete(d)}
-              aria-label="削除"
-              title="削除"
-            >
-              <Trash2 size={ICON} />
-            </button>
-          </li>
-        ))}
+        {shown?.map((it) =>
+          it.kind === 'pdf' ? (
+            <li key={it.key}>
+              <button className="doc" onClick={() => onOpen(it.doc.id)}>
+                <span className="name">{it.doc.name}</span>
+                <span className="meta">
+                  {it.doc.pageCount} ページ · 前回 p.{it.doc.lastPage}
+                  {it.doc.driveId ? (it.doc.driveMissing ? ' · Drive で削除済み' : ' · Drive') : ''}
+                  {it.doc.nameDirty ? '（名前変更を未同期）' : ''}
+                </span>
+              </button>
+              <button
+                className="btn icon"
+                onClick={() => onRename(it.doc)}
+                aria-label="名前変更"
+                title="名前変更"
+              >
+                <TextCursorInput size={ICON} />
+              </button>
+              <button
+                className="btn icon danger"
+                onClick={() => onDelete(it.doc)}
+                aria-label="削除"
+                title="削除"
+              >
+                <Trash2 size={ICON} />
+              </button>
+            </li>
+          ) : (
+            <li key={it.key}>
+              <button className="doc" onClick={() => onOpenVideo(it.video.id)}>
+                <span className="name">
+                  <MonitorPlay size={16} className="inline-icon" aria-hidden /> {it.video.name}
+                </span>
+                <span className="meta">
+                  YouTube
+                  {it.video.rate && it.video.rate !== 1 ? ` · ${it.video.rate}×` : ''}
+                  {it.video.lastTime ? ` · 前回 ${formatTime(it.video.lastTime)}` : ''}
+                </span>
+              </button>
+              <button
+                className="btn icon"
+                onClick={() => onRenameVideo(it.video)}
+                aria-label="名前変更"
+                title="名前変更"
+              >
+                <TextCursorInput size={ICON} />
+              </button>
+              <button
+                className="btn icon danger"
+                onClick={() => onDeleteVideo(it.video)}
+                aria-label="削除"
+                title="削除"
+              >
+                <Trash2 size={ICON} />
+              </button>
+            </li>
+          ),
+        )}
       </ul>
 
       <p className="muted small">

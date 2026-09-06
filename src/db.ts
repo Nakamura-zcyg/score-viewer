@@ -25,8 +25,23 @@ export interface DocRecord extends DocMeta {
 }
 
 const DB_NAME = 'score-viewer';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'docs';
+const VSTORE = 'videos';
+
+/** YouTube 動画の項目（端末内のみ。Drive 同期の対象外） */
+export interface VideoMeta {
+  id: number;
+  name: string;
+  videoId: string;
+  url: string;
+  added: number;
+  opened?: number;
+  /** 再生速度（記憶） */
+  rate?: number;
+  /** 最後の再生位置（秒） */
+  lastTime?: number;
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -35,6 +50,9 @@ function openDB(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(VSTORE)) {
+        db.createObjectStore(VSTORE, { keyPath: 'id', autoIncrement: true });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -165,5 +183,70 @@ export async function deleteDoc(id: number): Promise<void> {
   const db = await openDB();
   const t = db.transaction(STORE, 'readwrite');
   t.objectStore(STORE).delete(id);
+  await done(t);
+}
+
+// ---- 動画 ----
+
+export async function listVideos(): Promise<VideoMeta[]> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readonly');
+  const all = (await request(t.objectStore(VSTORE).getAll())) as VideoMeta[];
+  await done(t);
+  return all;
+}
+
+export async function addVideo(name: string, videoId: string, url: string): Promise<number> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readwrite');
+  const rec: Omit<VideoMeta, 'id'> = { name, videoId, url, added: Date.now() };
+  const id = await request(t.objectStore(VSTORE).add(rec));
+  await done(t);
+  return id as number;
+}
+
+export async function getVideo(id: number): Promise<VideoMeta | undefined> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readonly');
+  const rec = await request(t.objectStore(VSTORE).get(id));
+  await done(t);
+  return rec as VideoMeta | undefined;
+}
+
+async function patchVideo(id: number, fn: (rec: VideoMeta) => void): Promise<void> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readwrite');
+  const s = t.objectStore(VSTORE);
+  const rec = (await request(s.get(id))) as VideoMeta | undefined;
+  if (rec) {
+    fn(rec);
+    s.put(rec);
+  }
+  await done(t);
+}
+
+export function renameVideo(id: number, name: string): Promise<void> {
+  return patchVideo(id, (r) => {
+    r.name = name;
+  });
+}
+
+export function touchVideo(id: number): Promise<void> {
+  return patchVideo(id, (r) => {
+    r.opened = Date.now();
+  });
+}
+
+export function setVideoState(id: number, state: { rate?: number; lastTime?: number }): Promise<void> {
+  return patchVideo(id, (r) => {
+    if (state.rate !== undefined) r.rate = state.rate;
+    if (state.lastTime !== undefined) r.lastTime = state.lastTime;
+  });
+}
+
+export async function deleteVideo(id: number): Promise<void> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readwrite');
+  t.objectStore(VSTORE).delete(id);
   await done(t);
 }

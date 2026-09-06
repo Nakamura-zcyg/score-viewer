@@ -355,3 +355,65 @@ body,
   font-size: 14px;
   pointer-events: none;
 }
+
+/* ---- 動画 ---- */
+.video {
+  position: fixed;
+  inset: 0;
+  background: #000;
+}
+.video-host,
+.video-host iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.video-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+  color: var(--fg);
+}
+.video-bar.hidden {
+  display: none;
+}
+.video-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+.video-rate select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #111;
+  color: var(--fg);
+}
+.video-bar-show {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--fg);
+  font-size: 20px;
+}
+.inline-icon {
+  vertical-align: -3px;
+  color: #e33;
+}
