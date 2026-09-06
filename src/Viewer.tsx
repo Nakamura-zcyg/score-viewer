@@ -10,8 +10,15 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { setScrollSpeed, updateLastPage, type DocRecord } from './db.ts';
-import { loadPdf, pageSize, renderPage, type PDFDocumentProxy } from './pdf.ts';
+import { setCrops as saveCrops, setScrollSpeed, updateLastPage, type DocRecord } from './db.ts';
+import {
+  analyzeCrops,
+  loadPdf,
+  pageSize,
+  renderPage,
+  type PageCrop,
+  type PDFDocumentProxy,
+} from './pdf.ts';
 import AutoScroll from './AutoScroll.tsx';
 
 interface Props {
@@ -44,6 +51,19 @@ type TurnMode = 'auto' | 'page' | 'half' | 'width' | 'scroll';
 type EffectiveMode = 'page' | 'half' | 'width' | 'scroll';
 const MODE_KEY = 'score-viewer.turnMode';
 const SPEED_KEY = 'score-viewer.scrollSpeed';
+const CROP_KEY = 'score-viewer.crop';
+
+/** 自動スクロールでページの上下余白を切るか */
+type CropMode = 'auto' | 'none';
+
+function loadCropMode(): CropMode {
+  try {
+    if (localStorage.getItem(CROP_KEY) === 'none') return 'none';
+  } catch {
+    /* 無視 */
+  }
+  return 'auto';
+}
 
 function loadMode(): TurnMode {
   try {
@@ -133,6 +153,9 @@ export default function Viewer({ doc, onExit }: Props) {
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(() => loadSpeed(doc));
   const [jump, setJump] = useState<{ page: number; seq: number } | null>(null);
+  const [cropMode, setCropMode] = useState<CropMode>(loadCropMode);
+  const [crops, setCrops] = useState<PageCrop[] | null>(doc.crops ?? null);
+  const [analyzing, setAnalyzing] = useState<string | null>(null);
 
   const effMode: EffectiveMode =
     modeSetting === 'auto' ? (size.w > size.h ? 'half' : 'page') : modeSetting;
@@ -213,6 +236,37 @@ export default function Viewer({ doc, onExit }: Props) {
   useEffect(() => {
     if (!isScroll) setRunning(false);
   }, [isScroll]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CROP_KEY, cropMode);
+    } catch {
+      /* 無視 */
+    }
+  }, [cropMode]);
+
+  // ---- 余白の解析（スクロールモードで初めて必要になった時に 1 回。結果は曲に保存） ----
+  useEffect(() => {
+    if (!pdf || !isScroll || cropMode !== 'auto' || crops) return;
+    let alive = true;
+    setAnalyzing(`余白を解析中 0/${doc.pageCount}`);
+    analyzeCrops(pdf, (done, total) => {
+      if (alive) setAnalyzing(`余白を解析中 ${done}/${total}`);
+    })
+      .then((result) => {
+        if (!alive) return;
+        setCrops(result);
+        saveCrops(doc.id, result).catch(() => undefined);
+      })
+      .catch(() => {
+        if (alive) setCropMode('none');
+      })
+      .finally(() => {
+        if (alive) setAnalyzing(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [pdf, isScroll, cropMode, crops, doc.id, doc.pageCount]);
 
   // ---- 速度の保存（曲ごと + 次に開く曲の既定値） ----
   useEffect(() => {
@@ -592,6 +646,7 @@ export default function Viewer({ doc, onExit }: Props) {
           pageCount={doc.pageCount}
           dims={dims}
           size={size}
+          crops={cropMode === 'auto' ? crops : null}
           startPage={pos.page}
           jump={jump}
           running={running}
@@ -605,6 +660,8 @@ export default function Viewer({ doc, onExit }: Props) {
       ) : (
         <canvas ref={canvasRef} className="page-canvas" />
       )}
+
+      {analyzing && <div className="analyzing">{analyzing}</div>}
 
       {!pdf && (
         <div className="center">
@@ -723,6 +780,27 @@ export default function Viewer({ doc, onExit }: Props) {
                   <Plus size={20} />
                 </button>
                 <span className="speed">{speed} px/秒</span>
+              </div>
+            )}
+            {isScroll && (
+              <div className="row">
+                <label>
+                  余白カット{' '}
+                  <select
+                    value={cropMode}
+                    onChange={(e) => setCropMode(e.target.value as CropMode)}
+                  >
+                    <option value="auto">自動（上下の白を切る）</option>
+                    <option value="none">なし</option>
+                  </select>
+                </label>
+                <span className="muted-inline">
+                  {cropMode === 'auto'
+                    ? crops
+                      ? '解析済み'
+                      : analyzing ?? '未解析'
+                    : 'ページをそのまま並べる'}
+                </span>
               </div>
             )}
             <div className="row">

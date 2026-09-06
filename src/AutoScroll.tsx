@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { renderPage, type PDFDocumentProxy } from './pdf.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { renderPage, type PageCrop, type PDFDocumentProxy } from './pdf.ts';
 
 // 自動スクロール表示。ページを横幅いっぱいで縦に並べた帯を CSS transform で動かす。
 // 毎フレーム canvas を描き直さないので古い端末でも滑らか。見えている前後だけ描画する。
+// crops が与えられたときは各ページの上下の白い余白を切り、ページ間の間隔をそろえる。
 
 interface Props {
   pdf: PDFDocumentProxy;
   pageCount: number;
   dims: { w: number; h: number };
   size: { w: number; h: number };
+  /** 各ページの内容範囲。null なら余白を切らない */
+  crops: PageCrop[] | null;
   startPage: number;
   /** ページ指定ジャンプ。seq が変わるたびに適用 */
   jump: { page: number; seq: number } | null;
@@ -22,17 +25,72 @@ interface Props {
   menuOpen: boolean;
 }
 
-const GAP = 8; // ページ間の隙間 (CSS px)
+// 余白を切らないときのページ間の隙間 (CSS px)
+const GAP_PLAIN = 8;
+// 余白を切るとき、内容の上下に残す余白（ページ高さに対する割合）。前後のページ分が合わさって段間になる
+const CROP_PAD = 0.015;
 const TAP_MAX_MS = 400;
 const LONG_PRESS_MS = 500;
 const DRAG_START_PX = 12;
 const STALE_GESTURE_MS = 3000;
+
+interface Layout {
+  scale: number;
+  pageH: number;
+  /** 各ページの帯内での上端 (px) */
+  tops: number[];
+  /** 各ページの表示高さ (px) */
+  heights: number[];
+  /** 各ページで、上端から隠す量 (px) */
+  hidden: number[];
+  total: number;
+  maxY: number;
+}
+
+function computeLayout(
+  size: { w: number; h: number },
+  dims: { w: number; h: number },
+  pageCount: number,
+  crops: PageCrop[] | null,
+): Layout {
+  const scale = size.w / dims.w;
+  const pageH = dims.h * scale;
+  const gap = crops ? 0 : GAP_PLAIN;
+  const tops: number[] = [];
+  const heights: number[] = [];
+  const hidden: number[] = [];
+  let y = 0;
+  for (let i = 0; i < pageCount; i++) {
+    const c = crops?.[i];
+    const t = c ? Math.max(0, c.top - CROP_PAD) : 0;
+    const b = c ? Math.min(1, c.bottom + CROP_PAD) : 1;
+    tops.push(y);
+    heights.push((b - t) * pageH);
+    hidden.push(t * pageH);
+    y += (b - t) * pageH + (i < pageCount - 1 ? gap : 0);
+  }
+  return { scale, pageH, tops, heights, hidden, total: y, maxY: Math.max(0, y - size.h) };
+}
+
+/** y (px) がどのページにあるか。ページ間の隙間は直前のページ扱い */
+function pageAt(layout: Layout, y: number): number {
+  const { tops } = layout;
+  let lo = 0;
+  let hi = tops.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (tops[mid] <= y) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
 
 export default function AutoScroll({
   pdf,
   pageCount,
   dims,
   size,
+  crops,
   startPage,
   jump,
   running,
@@ -43,14 +101,13 @@ export default function AutoScroll({
   onLongPress,
   menuOpen,
 }: Props) {
-  const scale = size.w / dims.w;
-  const pageH = dims.h * scale;
-  const stride = pageH + GAP;
-  const total = pageCount * pageH + (pageCount - 1) * GAP;
-  const maxY = Math.max(0, total - size.h);
+  const layout = useMemo(
+    () => computeLayout(size, dims, pageCount, crops),
+    [size, dims, pageCount, crops],
+  );
+  const layoutRef = useRef(layout);
 
-  // 位置は「ページ単位の連続値」で持ち、倍率が変わっても同じ場所に留まるようにする
-  const posRef = useRef(startPage - 1); // 0 = 1 ページ目の先頭
+  const yRef = useRef<number | null>(null); // 帯のスクロール位置 (px)。初期化前は null
   const stripRef = useRef<HTMLDivElement>(null);
   const [win, setWin] = useState({ first: 1, last: 1 });
   const winRef = useRef(win);
@@ -61,61 +118,72 @@ export default function AutoScroll({
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const [, bump] = useState(0);
 
-  const yOf = useCallback(() => Math.min(Math.max(posRef.current * stride, 0), maxY), [stride, maxY]);
+  const clampY = useCallback((y: number, l: Layout) => Math.min(Math.max(y, 0), l.maxY), []);
 
   /** transform を更新し、描画ウィンドウと現在ページを再計算 */
   const apply = useCallback(() => {
-    const y = yOf();
+    const l = layoutRef.current;
+    const y = clampY(yRef.current ?? 0, l);
+    yRef.current = y;
     const el = stripRef.current;
     if (el) el.style.transform = `translate3d(0, ${-y}px, 0)`;
     const H = size.h;
-    const first = Math.max(1, Math.floor((y - H) / stride) + 1);
-    const last = Math.min(pageCount, Math.floor((y + 2 * H) / stride) + 1);
+    const first = pageAt(l, y - H);
+    const last = pageAt(l, y + 2 * H);
     if (first !== winRef.current.first || last !== winRef.current.last) {
       winRef.current = { first, last };
       setWin(winRef.current);
     }
     // 画面上部から 30% の位置にあるページを「現在ページ」とする
-    const cur = Math.min(pageCount, Math.max(1, Math.floor((y + H * 0.3) / stride) + 1));
+    const cur = pageAt(l, y + H * 0.3);
     if (cur !== lastPageRef.current) {
       lastPageRef.current = cur;
       onPage(cur);
     }
-  }, [yOf, size.h, stride, pageCount, onPage]);
+  }, [clampY, size.h, onPage]);
 
-  // ---- 初期位置・ジャンプ ----
+  // ---- レイアウト変更: 同じページ内の同じ位置に留まる。初回は startPage の先頭 ----
   useEffect(() => {
+    const prev = layoutRef.current;
+    const y = yRef.current;
+    if (y === null) {
+      yRef.current = layout.tops[Math.min(Math.max(startPage, 1), pageCount) - 1] ?? 0;
+    } else if (prev !== layout) {
+      const p = pageAt(prev, y);
+      const within = prev.heights[p - 1] > 0 ? (y - prev.tops[p - 1]) / prev.heights[p - 1] : 0;
+      yRef.current = layout.tops[p - 1] + Math.min(Math.max(within, 0), 1) * layout.heights[p - 1];
+    }
+    layoutRef.current = layout;
+    if (prev.scale !== layout.scale) {
+      cacheRef.current.clear();
+      pendingRef.current.clear();
+      bump((n) => n + 1);
+    }
     apply();
-  }, [apply]);
+    // startPage は初期位置にだけ使う
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, apply]);
+
+  // ---- ジャンプ ----
   useEffect(() => {
     if (!jump) return;
-    posRef.current = jump.page - 1;
+    yRef.current = layoutRef.current.tops[Math.min(Math.max(jump.page, 1), pageCount) - 1] ?? 0;
     apply();
-  }, [jump, apply]);
-
-  // ---- 倍率が変わったらキャッシュを捨てる ----
-  useEffect(() => {
-    cacheRef.current.clear();
-    pendingRef.current.clear();
-    bump((n) => n + 1);
-  }, [scale]);
+  }, [jump, apply, pageCount]);
 
   // ---- 描画ウィンドウ内のページを用意 ----
   useEffect(() => {
     const dpr = window.devicePixelRatio || 1;
     const { first, last } = win;
-    // 近い順に並べる
-    const order: number[] = [];
-    for (let p = first; p <= last; p++) order.push(p);
-    for (const p of order) {
+    const scale = layout.scale;
+    for (let p = first; p <= last; p++) {
       if (cacheRef.current.has(p) || pendingRef.current.has(p)) continue;
       pendingRef.current.add(p);
-      const s = scale;
       chainRef.current = chainRef.current
-        .then(() => renderPage(pdf, p, s, dpr))
+        .then(() => renderPage(pdf, p, scale, dpr))
         .then((c) => {
           pendingRef.current.delete(p);
-          if (s !== scale) return; // 描画中に倍率が変わった
+          if (layoutRef.current.scale !== scale) return; // 描画中に倍率が変わった
           cacheRef.current.set(p, c);
           bump((n) => n + 1);
         })
@@ -128,7 +196,7 @@ export default function AutoScroll({
     for (const k of Array.from(cacheRef.current.keys())) {
       if (k < first - 1 || k > last + 1) cacheRef.current.delete(k);
     }
-  }, [win, pdf, scale]);
+  }, [win, pdf, layout.scale]);
 
   // ---- 自動スクロール ----
   useEffect(() => {
@@ -138,9 +206,10 @@ export default function AutoScroll({
     const tick = (t: number) => {
       const dt = Math.min((t - last) / 1000, 0.1); // タブ復帰時の飛びを抑える
       last = t;
-      posRef.current += (speed * dt) / stride;
-      const atEnd = posRef.current * stride >= maxY;
-      if (atEnd) posRef.current = maxY / stride;
+      const l = layoutRef.current;
+      const next = (yRef.current ?? 0) + speed * dt;
+      const atEnd = next >= l.maxY;
+      yRef.current = atEnd ? l.maxY : next;
       apply();
       if (atEnd) {
         onEnd();
@@ -150,7 +219,7 @@ export default function AutoScroll({
     };
     id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [running, speed, stride, maxY, apply, onEnd]);
+  }, [running, speed, apply, onEnd]);
 
   // ---- ジェスチャ: タップ=再生/停止、長押し=メニュー、ドラッグ=手動スクロール ----
   const gRef = useRef<{
@@ -214,7 +283,7 @@ export default function AutoScroll({
     }
     const dy = e.clientY - g.lastY;
     g.lastY = e.clientY;
-    posRef.current = Math.min(Math.max(posRef.current - dy / stride, 0), maxY / stride);
+    yRef.current = (yRef.current ?? 0) - dy;
     apply();
   };
 
@@ -239,13 +308,15 @@ export default function AutoScroll({
       onPointerCancel={clear}
       onLostPointerCapture={clear}
     >
-      <div ref={stripRef} className="strip" style={{ height: total }}>
+      <div ref={stripRef} className="strip" style={{ height: layout.total }}>
         {pages.map((p) => (
           <PageSlot
             key={p}
-            top={(p - 1) * stride}
+            top={layout.tops[p - 1]}
             width={size.w}
-            height={pageH}
+            height={layout.heights[p - 1]}
+            hidden={layout.hidden[p - 1]}
+            pageH={layout.pageH}
             src={cacheRef.current.get(p) ?? null}
           />
         ))}
@@ -258,11 +329,15 @@ function PageSlot({
   top,
   width,
   height,
+  hidden,
+  pageH,
   src,
 }: {
   top: number;
   width: number;
   height: number;
+  hidden: number;
+  pageH: number;
   src: HTMLCanvasElement | null;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -277,7 +352,11 @@ function PageSlot({
   }, [src]);
   return (
     <div className="page-slot" style={{ top, width, height }}>
-      {src ? <canvas ref={ref} /> : <div className="page-placeholder" />}
+      {src ? (
+        <canvas ref={ref} style={{ top: -hidden, height: pageH }} />
+      ) : (
+        <div className="page-placeholder" />
+      )}
     </div>
   );
 }

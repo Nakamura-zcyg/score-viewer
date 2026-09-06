@@ -16,6 +16,8 @@ export interface DocMeta {
   driveMissing?: boolean;
   /** 自動スクロールの速度 (CSS px/秒)。曲ごとに記憶 */
   scrollSpeed?: number;
+  /** 各ページの内容がある縦範囲（割合）。余白カット用。未解析なら undefined */
+  crops?: { top: number; bottom: number }[];
 }
 
 export interface DocRecord extends DocMeta {
@@ -137,6 +139,12 @@ export function linkDrive(id: number, driveId: string): Promise<void> {
   return patch(id, (r) => {
     r.driveId = driveId;
     delete r.driveMissing;
+  });
+}
+
+export function setCrops(id: number, crops: { top: number; bottom: number }[]): Promise<void> {
+  return patch(id, (r) => {
+    r.crops = crops;
   });
 }
 
