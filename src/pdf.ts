@@ -7,8 +7,35 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export type { PDFDocumentProxy };
 
+let workerReady: Promise<void> | null = null;
+
+/**
+ * ワーカーのコードを通常の fetch で取り寄せ、Blob URL から起動するようにする。
+ * pdf.js はモジュール形式の Worker を URL 直指定で起動するが、その読み込みを
+ * Service Worker が横取りしない環境があり、オフラインで「読み込み中」のまま止まる。
+ * 通常の fetch は必ず Service Worker を通るので、キャッシュ済みなら圏外でも届く。
+ * 取り寄せに失敗したら従来どおり URL 直指定に戻す。
+ */
+function ensureWorker(): Promise<void> {
+  if (!workerReady) {
+    workerReady = (async () => {
+      try {
+        const res = await fetch(workerUrl);
+        if (!res.ok) throw new Error(`worker ${res.status}`);
+        const code = await res.text();
+        const blob = new Blob([code], { type: 'text/javascript' });
+        pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+      } catch {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+      }
+    })();
+  }
+  return workerReady;
+}
+
 /** ArrayBuffer から読み込む。pdf.js はバッファを worker に転送して使えなくするので複製を渡す */
-export function loadPdf(data: ArrayBuffer): Promise<PDFDocumentProxy> {
+export async function loadPdf(data: ArrayBuffer): Promise<PDFDocumentProxy> {
+  await ensureWorker();
   return pdfjsLib.getDocument({ data: data.slice(0) }).promise;
 }
 

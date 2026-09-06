@@ -29,6 +29,8 @@ const MOVE_CANCEL_PX = 12;
 const STALE_GESTURE_MS = 3000;
 // 先読みするページ数（前後）
 const PREFETCH = 2;
+// 読み込みがこれ以上かかったら案内と戻るボタンを出す
+const LOAD_SLOW_MS = 8000;
 // 半ページモード: 上下それぞれが表示するページ高さの割合。0.5 なら重なりなし、0.575 なら 15% 重なる
 const HALF_VIEW_FRACTION = 0.575;
 // 自動スクロールの速度範囲と既定値 (CSS px/秒)
@@ -152,23 +154,36 @@ export default function Viewer({ doc, onExit }: Props) {
   layoutRef.current = layout;
 
   // ---- PDF 読み込み ----
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadSlow, setLoadSlow] = useState(false);
   useEffect(() => {
     let alive = true;
     let loaded: PDFDocumentProxy | null = null;
-    loadPdf(doc.data).then(async (d) => {
-      if (!alive) {
-        d.destroy();
-        return;
-      }
-      loaded = d;
-      // 全ページ同寸法とみなし、1 ページ目の寸法でレイアウトを決める
-      const s = await pageSize(d, 1);
-      if (!alive) return;
-      setDims(s);
-      setPdf(d);
-    });
+    setLoadError(null);
+    setLoadSlow(false);
+    const slowTimer = window.setTimeout(() => setLoadSlow(true), LOAD_SLOW_MS);
+    loadPdf(doc.data)
+      .then(async (d) => {
+        if (!alive) {
+          d.destroy();
+          return;
+        }
+        loaded = d;
+        // 全ページ同寸法とみなし、1 ページ目の寸法でレイアウトを決める
+        const s = await pageSize(d, 1);
+        if (!alive) return;
+        setDims(s);
+        setPdf(d);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        // 「読み込み中」のまま止めない。原因を画面に出す
+        setLoadError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => clearTimeout(slowTimer));
     return () => {
       alive = false;
+      clearTimeout(slowTimer);
       loaded?.destroy();
     };
   }, [doc]);
@@ -591,7 +606,32 @@ export default function Viewer({ doc, onExit }: Props) {
         <canvas ref={canvasRef} className="page-canvas" />
       )}
 
-      {!pdf && <div className="center muted">読み込み中…</div>}
+      {!pdf && (
+        <div className="center">
+          <div className="load-status">
+            {loadError ? (
+              <>
+                <p>楽譜を開けませんでした。</p>
+                <p className="muted-inline">{loadError}</p>
+              </>
+            ) : (
+              <>
+                <p className="muted">読み込み中…</p>
+                {loadSlow && (
+                  <p className="muted-inline">
+                    時間がかかっています。圏外の場合は、一度ネットに繋いでこのアプリを開き直すと必要なファイルが保存されます。
+                  </p>
+                )}
+              </>
+            )}
+            {(loadError || loadSlow) && (
+              <button className="btn with-icon" onClick={onExit}>
+                <LibraryBig size={20} /> ライブラリへ戻る
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className={'indicator' + (indicator ? ' show' : '')}>{indicator ?? ''}</div>
 
