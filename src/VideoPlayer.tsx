@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { setVideoState, type VideoMeta } from './db.ts';
 import { loadYouTubeApi, PLAYBACK_RATES, type YTPlayer } from './youtube.ts';
+import { useWakeLock } from './useWakeLock.ts';
 
 // YouTube 埋め込みプレイヤー。操作は YouTube 標準。上のバーに戻るボタンと再生速度を置く。
 // 速度と再生位置は動画ごとに保存し、次に開いた時に続きから始める。
@@ -113,26 +114,8 @@ export default function VideoPlayer({ video, onExit }: Props) {
     setVideoState(video.id, { rate: r }).catch(() => undefined);
   };
 
-  // ---- 画面消灯防止 ----
-  useEffect(() => {
-    let lock: WakeLockSentinel | null = null;
-    const acquire = async () => {
-      try {
-        lock = await navigator.wakeLock?.request('screen');
-      } catch {
-        /* 無視 */
-      }
-    };
-    const onVis = () => {
-      if (document.visibilityState === 'visible') acquire();
-    };
-    acquire();
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      lock?.release().catch(() => undefined);
-    };
-  }, []);
+  // ---- 画面消灯防止（1 時間無操作で解除。再生中はブラウザ自体が画面を保つ） ----
+  useWakeLock(false);
 
   return (
     <div className="video">

@@ -20,6 +20,7 @@ import {
   type PDFDocumentProxy,
 } from './pdf.ts';
 import AutoScroll from './AutoScroll.tsx';
+import { useWakeLock } from './useWakeLock.ts';
 
 interface Props {
   doc: DocRecord;
@@ -587,26 +588,8 @@ export default function Viewer({ doc, onExit }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen, next, prev, isScroll, toggleRunning, changeSpeed]);
 
-  // ---- 画面消灯防止 ----
-  useEffect(() => {
-    let lock: WakeLockSentinel | null = null;
-    const acquire = async () => {
-      try {
-        lock = await navigator.wakeLock?.request('screen');
-      } catch {
-        /* 非対応や省電力モードでは失敗する。無視 */
-      }
-    };
-    const onVis = () => {
-      if (document.visibilityState === 'visible') acquire();
-    };
-    acquire();
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      lock?.release().catch(() => undefined);
-    };
-  }, []);
+  // ---- 画面消灯防止（1 時間無操作で解除。自動スクロール中は無操作に数えない） ----
+  useWakeLock(running);
 
   // ---- 右クリック／長押しメニュー抑止 ----
   useEffect(() => {
