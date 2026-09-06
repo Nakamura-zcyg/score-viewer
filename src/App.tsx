@@ -6,6 +6,19 @@ import Viewer from './Viewer.tsx';
 export default function App() {
   const [current, setCurrent] = useState<DocRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Service Worker が全ファイルをキャッシュし終えたら知らせる
+  useEffect(() => {
+    const onReady = () => setToast('オフラインでも使えるようになりました');
+    window.addEventListener('sw-offline-ready', onReady);
+    return () => window.removeEventListener('sw-offline-ready', onReady);
+  }, []);
+  useEffect(() => {
+    if (toast === null) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const open = useCallback(async (id: number) => {
     try {
@@ -33,8 +46,14 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, [current]);
 
-  if (current) {
-    return <Viewer doc={current} onExit={exit} />;
-  }
-  return <Library onOpen={open} error={error} onClearError={() => setError(null)} />;
+  return (
+    <>
+      {current ? (
+        <Viewer doc={current} onExit={exit} />
+      ) : (
+        <Library onOpen={open} error={error} onClearError={() => setError(null)} />
+      )}
+      {toast && <div className="toast">{toast}</div>}
+    </>
+  );
 }

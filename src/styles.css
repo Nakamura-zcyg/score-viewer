@@ -315,3 +315,17 @@ body,
   color: var(--muted);
   font-size: 13px;
 }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(40, 40, 40, 0.95);
+  color: var(--fg);
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
