@@ -697,7 +697,14 @@ export default function Viewer({ doc, onExit }: Props) {
       <div className={'indicator' + (indicator ? ' show' : '')}>{indicator ?? ''}</div>
 
       {menuOpen && (
-        <div className="overlay" onPointerDown={(e) => e.stopPropagation()}>
+        <div
+          className="overlay"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            // パネルの外側（背景）をタップしたら閉じる
+            if (e.target === e.currentTarget) setMenuOpen(false);
+          }}
+        >
           <div className="panel">
             <div className="row title">{doc.name}</div>
             <div className="row">
