@@ -21,6 +21,7 @@ import {
 } from './pdf.ts';
 import AutoScroll from './AutoScroll.tsx';
 import { useWakeLock } from './useWakeLock.ts';
+import { useSettings } from './settings.ts';
 
 interface Props {
   doc: DocRecord;
@@ -29,8 +30,6 @@ interface Props {
 
 // タップ判定: 指が触れてから離すまでがこれ未満なら「タップ」
 const TAP_MAX_MS = 400;
-// 長押し判定: 触れたままこれ以上経ったら「長押し」
-const LONG_PRESS_MS = 500;
 // これ以上動いたらタップ／長押しのどちらでもない
 const MOVE_CANCEL_PX = 12;
 // pointerup が来ないままこれ以上経った操作は残骸とみなして捨てる
@@ -39,8 +38,6 @@ const STALE_GESTURE_MS = 3000;
 const PREFETCH = 2;
 // 読み込みがこれ以上かかったら案内と戻るボタンを出す
 const LOAD_SLOW_MS = 8000;
-// 半ページモード: 上下それぞれが表示するページ高さの割合。0.5 なら重なりなし、0.575 なら 15% 重なる
-const HALF_VIEW_FRACTION = 0.575;
 // 自動スクロールの速度範囲と既定値 (CSS px/秒)
 const SPEED_MIN = 5;
 const SPEED_MAX = 300;
@@ -100,6 +97,7 @@ function computeLayout(
   mode: Exclude<EffectiveMode, 'scroll'>,
   size: { w: number; h: number },
   dims: { w: number; h: number },
+  halfViewFraction: number,
 ): Layout {
   const { w: W, h: H } = size;
   if (mode === 'page') {
@@ -109,7 +107,7 @@ function computeLayout(
   // width: 横幅いっぱい。縦にはみ出す分はスライスで送る
   // half: 横幅いっぱい、ただし 1 画面がページ高さの HALF_VIEW_FRACTION を超えないよう縮める
   const scale =
-    mode === 'width' ? W / dims.w : Math.min(W / dims.w, H / (HALF_VIEW_FRACTION * dims.h));
+    mode === 'width' ? W / dims.w : Math.min(W / dims.w, H / (halfViewFraction * dims.h));
   const pageH = dims.h * scale;
   if (pageH <= H + 0.5) {
     return { scale, slices: [0], pageW: dims.w * scale, pageH };
@@ -162,9 +160,15 @@ export default function Viewer({ doc, onExit }: Props) {
     modeSetting === 'auto' ? (size.w > size.h ? 'half' : 'page') : modeSetting;
   const isScroll = effMode === 'scroll';
 
+  const settings = useSettings();
+  // 半ページモード: 上下それぞれが表示するページ高さの割合。重なり 15% なら 0.575
+  const halfViewFraction = 0.5 + settings.halfOverlapPercent / 200;
   const layout = useMemo(
-    () => (dims && !isScroll ? computeLayout(effMode as Exclude<EffectiveMode, 'scroll'>, size, dims) : null),
-    [effMode, isScroll, size, dims],
+    () =>
+      dims && !isScroll
+        ? computeLayout(effMode as Exclude<EffectiveMode, 'scroll'>, size, dims, halfViewFraction)
+        : null,
+    [effMode, isScroll, size, dims, halfViewFraction],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -493,7 +497,7 @@ export default function Viewer({ doc, onExit }: Props) {
         g.consumed = true;
         setMenuOpen(true);
       }
-    }, LONG_PRESS_MS);
+    }, settings.longPressMs);
     gestureRef.current = g;
   };
 

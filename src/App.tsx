@@ -3,8 +3,13 @@ import { getDoc, getVideo, touchDoc, touchVideo, type DocRecord, type VideoMeta 
 import Library from './Library.tsx';
 import Viewer from './Viewer.tsx';
 import VideoPlayer from './VideoPlayer.tsx';
+import Settings from './Settings.tsx';
 
-type Current = { kind: 'pdf'; doc: DocRecord } | { kind: 'video'; video: VideoMeta } | null;
+type Current =
+  | { kind: 'pdf'; doc: DocRecord }
+  | { kind: 'video'; video: VideoMeta }
+  | { kind: 'settings' }
+  | null;
 
 export default function App() {
   const [current, setCurrent] = useState<Current>(null);
@@ -66,10 +71,13 @@ export default function App() {
         <Viewer doc={current.doc} onExit={exit} />
       ) : current?.kind === 'video' ? (
         <VideoPlayer video={current.video} onExit={exit} />
+      ) : current?.kind === 'settings' ? (
+        <Settings onExit={exit} />
       ) : (
         <Library
           onOpen={open}
           onOpenVideo={openVideo}
+          onOpenSettings={() => setCurrent({ kind: 'settings' })}
           error={error}
           onClearError={() => setError(null)}
         />

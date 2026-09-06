@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderPage, type PageCrop, type PDFDocumentProxy } from './pdf.ts';
+import { useSettings } from './settings.ts';
 
 // 自動スクロール表示。ページを横幅いっぱいで縦に並べた帯を CSS transform で動かす。
 // 毎フレーム canvas を描き直さないので古い端末でも滑らか。見えている前後だけ描画する。
@@ -29,16 +30,12 @@ interface Props {
   menuOpen: boolean;
 }
 
-// 上下タップで送る量（この秒数ぶんの速度）と、そのアニメーション時間
-const NUDGE_SECONDS = 5;
+// 上下タップの送りのアニメーション時間（送る量は設定の秒数 × 速度）
 const NUDGE_ANIM_MS = 250;
 
 // 余白を切らないときのページ間の隙間 (CSS px)
 const GAP_PLAIN = 8;
-// 余白を切るとき、内容の上下に残す余白（ページ高さに対する割合）。前後のページ分が合わさって段間になる
-const CROP_PAD = 0.015;
 const TAP_MAX_MS = 400;
-const LONG_PRESS_MS = 500;
 const DRAG_START_PX = 12;
 const STALE_GESTURE_MS = 3000;
 
@@ -60,6 +57,7 @@ function computeLayout(
   dims: { w: number; h: number },
   pageCount: number,
   crops: PageCrop[] | null,
+  cropPad: number,
 ): Layout {
   const scale = size.w / dims.w;
   const pageH = dims.h * scale;
@@ -70,8 +68,8 @@ function computeLayout(
   let y = 0;
   for (let i = 0; i < pageCount; i++) {
     const c = crops?.[i];
-    const t = c ? Math.max(0, c.top - CROP_PAD) : 0;
-    const b = c ? Math.min(1, c.bottom + CROP_PAD) : 1;
+    const t = c ? Math.max(0, c.top - cropPad) : 0;
+    const b = c ? Math.min(1, c.bottom + cropPad) : 1;
     tops.push(y);
     heights.push((b - t) * pageH);
     hidden.push(t * pageH);
@@ -110,9 +108,11 @@ export default function AutoScroll({
   onNudge,
   menuOpen,
 }: Props) {
+  const settings = useSettings();
+  const cropPad = settings.cropPadPercent / 100;
   const layout = useMemo(
-    () => computeLayout(size, dims, pageCount, crops),
-    [size, dims, pageCount, crops],
+    () => computeLayout(size, dims, pageCount, crops, cropPad),
+    [size, dims, pageCount, crops, cropPad],
   );
   const layoutRef = useRef(layout);
 
@@ -286,7 +286,7 @@ export default function AutoScroll({
         g.consumed = true;
         onMenu();
       }
-    }, LONG_PRESS_MS);
+    }, settings.longPressMs);
     gRef.current = g;
   };
 
@@ -346,12 +346,13 @@ export default function AutoScroll({
     if (performance.now() - g.t > TAP_MAX_MS) return;
     const h = (e.currentTarget as HTMLElement).clientHeight || size.h;
     // 上半分: 戻す、下半分: 送る
+    const sec = settings.nudgeSeconds;
     if (e.clientY < h / 2) {
-      nudge(-speed * NUDGE_SECONDS);
-      onNudge(-NUDGE_SECONDS);
+      nudge(-speed * sec);
+      onNudge(-sec);
     } else {
-      nudge(speed * NUDGE_SECONDS);
-      onNudge(NUDGE_SECONDS);
+      nudge(speed * sec);
+      onNudge(sec);
     }
   };
 

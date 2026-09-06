@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { useSettings } from './settings.ts';
 
-// 画面消灯防止。無操作が idleMs 続いたら解除して、端末のスリープに任せる。
+// 画面消灯防止。無操作が設定の分数だけ続いたら解除して、端末のスリープに任せる。
 // 操作（タッチ・キー）があれば取り直す。active が true の間（自動スクロール中など）は無操作に数えない。
 
-export const WAKE_IDLE_MS = 60 * 60 * 1000; // 1 時間
-
-export function useWakeLock(active: boolean, idleMs: number = WAKE_IDLE_MS): void {
+export function useWakeLock(active: boolean): void {
+  const idleMs = useSettings().idleMinutes * 60 * 1000;
   const activeRef = useRef(active);
   activeRef.current = active;
   const pokeRef = useRef<() => void>(() => undefined);

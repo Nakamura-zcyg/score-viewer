@@ -3,10 +3,12 @@ import {
   CloudDownload,
   CloudUpload,
   FilePlus,
+  FileText,
+  MonitorPlay,
   Search,
+  Settings as SettingsIcon,
   TextCursorInput,
   Trash2,
-  MonitorPlay,
 } from 'lucide-react';
 import {
   addDoc,
@@ -33,8 +35,26 @@ import {
 interface Props {
   onOpen: (id: number) => void;
   onOpenVideo: (id: number) => void;
+  onOpenSettings: () => void;
   error: string | null;
   onClearError: () => void;
+}
+
+/** 一覧に含める種類。両方オフにはしない */
+interface Filter {
+  pdf: boolean;
+  video: boolean;
+}
+const FILTER_KEY = 'score-viewer.filter';
+
+function loadFilter(): Filter {
+  try {
+    const j = JSON.parse(localStorage.getItem(FILTER_KEY) ?? '') as Partial<Filter>;
+    const f = { pdf: j.pdf !== false, video: j.video !== false };
+    return f.pdf || f.video ? f : { pdf: true, video: true };
+  } catch {
+    return { pdf: true, video: true };
+  }
 }
 
 /** 一覧の 1 行。PDF と動画を同じ並びで扱う */
@@ -83,7 +103,7 @@ function formatTime(sec: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export default function Library({ onOpen, onOpenVideo, error, onClearError }: Props) {
+export default function Library({ onOpen, onOpenVideo, onOpenSettings, error, onClearError }: Props) {
   const [docs, setDocs] = useState<DocMeta[] | null>(null);
   const [videos, setVideos] = useState<VideoMeta[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -91,6 +111,22 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>(loadSort);
+  const [filter, setFilter] = useState<Filter>(loadFilter);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify(filter));
+    } catch {
+      /* 無視 */
+    }
+  }, [filter]);
+
+  // 片方を消そうとして両方オフになる場合は変えない
+  const toggleFilter = (key: keyof Filter) =>
+    setFilter((f) => {
+      const next = { ...f, [key]: !f[key] };
+      return next.pdf || next.video ? next : f;
+    });
 
   const refresh = useCallback(async () => {
     const [d, v] = await Promise.all([listDocs(), listVideos().catch(() => [] as VideoMeta[])]);
@@ -134,7 +170,9 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
   const shown = useMemo(() => {
     if (!items) return null;
     const q = norm(query.trim());
-    const filtered = q ? items.filter((d) => norm(d.name).includes(q)) : items.slice();
+    const filtered = items.filter(
+      (d) => (d.kind === 'pdf' ? filter.pdf : filter.video) && (!q || norm(d.name).includes(q)),
+    );
     const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
     switch (sort) {
       case 'name':
@@ -147,7 +185,7 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
         filtered.sort((a, b) => b.added - a.added);
     }
     return filtered;
-  }, [items, query, sort]);
+  }, [items, query, sort, filter]);
 
   const onFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -325,6 +363,9 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
             <FilePlus size={ICON} />
             <input type="file" accept="application/pdf,.pdf" multiple hidden onChange={onFiles} />
           </label>
+          <button className="btn icon" onClick={onOpenSettings} aria-label="設定" title="設定">
+            <SettingsIcon size={ICON} />
+          </button>
         </div>
       </header>
 
@@ -363,6 +404,24 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
             <option value="added">追加日順</option>
             <option value="opened">最近開いた順</option>
           </select>
+          <button
+            className={'btn icon toggle' + (filter.pdf ? ' on' : '')}
+            onClick={() => toggleFilter('pdf')}
+            aria-pressed={filter.pdf}
+            aria-label="PDF を表示"
+            title="PDF を表示"
+          >
+            <FileText size={ICON} />
+          </button>
+          <button
+            className={'btn icon toggle' + (filter.video ? ' on' : '')}
+            onClick={() => toggleFilter('video')}
+            aria-pressed={filter.video}
+            aria-label="動画を表示"
+            title="動画を表示"
+          >
+            <MonitorPlay size={ICON} />
+          </button>
         </div>
       )}
 
