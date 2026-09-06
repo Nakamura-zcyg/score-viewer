@@ -18,12 +18,20 @@ interface Props {
   running: boolean;
   /** CSS px / 秒 */
   speed: number;
+  /** 2 本指タップ・右クリック: 再生／停止 */
   onToggle: () => void;
   onEnd: () => void;
   onPage: (page: number) => void;
-  onLongPress: () => void;
+  /** 長押し: メニュー */
+  onMenu: () => void;
+  /** 上下タップで送った／戻した時の通知（秒。負なら戻し） */
+  onNudge: (seconds: number) => void;
   menuOpen: boolean;
 }
+
+// 上下タップで送る量（この秒数ぶんの速度）と、そのアニメーション時間
+const NUDGE_SECONDS = 5;
+const NUDGE_ANIM_MS = 250;
 
 // 余白を切らないときのページ間の隙間 (CSS px)
 const GAP_PLAIN = 8;
@@ -98,7 +106,8 @@ export default function AutoScroll({
   onToggle,
   onEnd,
   onPage,
-  onLongPress,
+  onMenu,
+  onNudge,
   menuOpen,
 }: Props) {
   const layout = useMemo(
@@ -230,6 +239,8 @@ export default function AutoScroll({
     timer: number;
     dragging: boolean;
     consumed: boolean;
+    /** 押している間に 2 本目の指が触れた */
+    multi: boolean;
     lastY: number;
   } | null>(null);
 
@@ -244,7 +255,14 @@ export default function AutoScroll({
     if (menuOpen) return;
     const stale = gRef.current;
     if (stale) {
-      if (performance.now() - stale.t < STALE_GESTURE_MS) return;
+      if (performance.now() - stale.t < STALE_GESTURE_MS) {
+        // 2 本目の指: 再生／停止の合図。長押し判定は解除する
+        if (!stale.dragging) {
+          stale.multi = true;
+          clearTimeout(stale.timer);
+        }
+        return;
+      }
       clear();
     }
     try {
@@ -260,16 +278,45 @@ export default function AutoScroll({
       timer: 0,
       dragging: false,
       consumed: false,
+      multi: false,
       lastY: e.clientY,
     };
     g.timer = window.setTimeout(() => {
       if (gRef.current === g && !g.dragging) {
         g.consumed = true;
-        onLongPress();
+        onMenu();
       }
     }, LONG_PRESS_MS);
     gRef.current = g;
   };
+
+  // ---- 上下タップの送り／戻し。短いアニメーションで加算するので、再生中の進みと合成できる ----
+  const nudgeRef = useRef<{ raf: number; applied: number; total: number; start: number } | null>(
+    null,
+  );
+  const nudge = useCallback(
+    (px: number) => {
+      const prev = nudgeRef.current;
+      if (prev) cancelAnimationFrame(prev.raf);
+      const state = { raf: 0, applied: 0, total: px, start: performance.now() };
+      nudgeRef.current = state;
+      const step = (t: number) => {
+        const k = Math.min((t - state.start) / NUDGE_ANIM_MS, 1);
+        const eased = 1 - (1 - k) * (1 - k); // ease-out
+        const target = state.total * eased;
+        yRef.current = (yRef.current ?? 0) + (target - state.applied);
+        state.applied = target;
+        apply();
+        if (k < 1) state.raf = requestAnimationFrame(step);
+        else nudgeRef.current = null;
+      };
+      state.raf = requestAnimationFrame(step);
+    },
+    [apply],
+  );
+  useEffect(() => () => {
+    if (nudgeRef.current) cancelAnimationFrame(nudgeRef.current.raf);
+  }, []);
 
   const onPointerMove = (e: React.PointerEvent) => {
     const g = gRef.current;
@@ -292,7 +339,30 @@ export default function AutoScroll({
     if (!g || g.id !== e.pointerId) return;
     clear();
     if (g.consumed) return;
+    if (g.multi) {
+      onToggle();
+      return;
+    }
     if (performance.now() - g.t > TAP_MAX_MS) return;
+    const h = (e.currentTarget as HTMLElement).clientHeight || size.h;
+    // 上半分: 戻す、下半分: 送る
+    if (e.clientY < h / 2) {
+      nudge(-speed * NUDGE_SECONDS);
+      onNudge(-NUDGE_SECONDS);
+    } else {
+      nudge(speed * NUDGE_SECONDS);
+      onNudge(NUDGE_SECONDS);
+    }
+  };
+
+  // PC: 右クリック（タッチパッドの 2 本指タップもここに来る）で再生／停止
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (menuOpen) return;
+    // タッチの長押しでも contextmenu が来る。pointerType が分かればマウス以外を弾き、
+    // 分からない古い Chrome ではタッチ操作の途中（gRef あり）なら無視する
+    const pt = (e.nativeEvent as Partial<PointerEvent>).pointerType;
+    if (pt ? pt !== 'mouse' : gRef.current !== null) return;
     onToggle();
   };
 
@@ -307,6 +377,7 @@ export default function AutoScroll({
       onPointerUp={onPointerUp}
       onPointerCancel={clear}
       onLostPointerCapture={clear}
+      onContextMenu={onContextMenu}
     >
       <div ref={stripRef} className="strip" style={{ height: layout.total }}>
         {pages.map((p) => (

@@ -444,6 +444,9 @@ export default function Viewer({ doc, onExit }: Props) {
     setPos((p) => (p.page === page ? p : { page, slice: 0 }));
   }, []);
   const openMenu = useCallback(() => setMenuOpen(true), []);
+  const onNudge = useCallback((seconds: number) => {
+    setIndicator(seconds > 0 ? `${seconds} 秒送り` : `${-seconds} 秒戻し`);
+  }, []);
 
   // ---- タップ／長押し判定（ページ・半ページ・横幅モード） ----
   const gestureRef = useRef<{
@@ -623,7 +626,7 @@ export default function Viewer({ doc, onExit }: Props) {
 
   const sliceCount = layout?.slices.length ?? 1;
   const tapHint = isScroll
-    ? 'タップで再生/停止・ドラッグで移動'
+    ? '上下タップで 5 秒戻し/送り・2 本指タップ（PC は右クリック）で再生/停止・ドラッグで移動'
     : sliceCount > 1
       ? `${sliceCount} 分割・上下タップ`
       : '左右タップ';
@@ -654,7 +657,8 @@ export default function Viewer({ doc, onExit }: Props) {
           onToggle={toggleRunning}
           onEnd={onScrollEnd}
           onPage={onScrollPage}
-          onLongPress={openMenu}
+          onMenu={openMenu}
+          onNudge={onNudge}
           menuOpen={menuOpen}
         />
       ) : (
