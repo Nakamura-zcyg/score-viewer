@@ -41,6 +41,12 @@ export interface VideoMeta {
   rate?: number;
   /** 最後の再生位置（秒） */
   lastTime?: number;
+  /** 名前・速度・位置を最後に変えた時刻。Drive との合流で新しい方を採る */
+  updated?: number;
+  /** Drive の videos.json に載っている（載せたことがある） */
+  synced?: boolean;
+  /** Drive の videos.json から消えていた（他の端末で削除された） */
+  driveMissing?: boolean;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -228,6 +234,7 @@ async function patchVideo(id: number, fn: (rec: VideoMeta) => void): Promise<voi
 export function renameVideo(id: number, name: string): Promise<void> {
   return patchVideo(id, (r) => {
     r.name = name;
+    r.updated = Date.now();
   });
 }
 
@@ -241,6 +248,45 @@ export function setVideoState(id: number, state: { rate?: number; lastTime?: num
   return patchVideo(id, (r) => {
     if (state.rate !== undefined) r.rate = state.rate;
     if (state.lastTime !== undefined) r.lastTime = state.lastTime;
+    r.updated = Date.now();
+  });
+}
+
+/** Drive 側の内容で上書き・追加する（同期用） */
+export async function upsertVideoFromRemote(v: {
+  videoId: string;
+  name: string;
+  url: string;
+  added: number;
+  updated?: number;
+  rate?: number;
+  lastTime?: number;
+}): Promise<void> {
+  const db = await openDB();
+  const t = db.transaction(VSTORE, 'readwrite');
+  const s = t.objectStore(VSTORE);
+  const all = (await request(s.getAll())) as VideoMeta[];
+  const cur = all.find((x) => x.videoId === v.videoId);
+  if (cur) {
+    cur.name = v.name;
+    cur.rate = v.rate;
+    cur.lastTime = v.lastTime;
+    cur.updated = v.updated;
+    cur.synced = true;
+    delete cur.driveMissing;
+    s.put(cur);
+  } else {
+    s.add({ ...v, synced: true });
+  }
+  await done(t);
+}
+
+export function markVideoSynced(id: number, synced: boolean, missing: boolean): Promise<void> {
+  return patchVideo(id, (r) => {
+    if (synced) r.synced = true;
+    else delete r.synced;
+    if (missing) r.driveMissing = true;
+    else delete r.driveMissing;
   });
 }
 

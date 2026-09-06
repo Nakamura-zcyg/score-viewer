@@ -152,6 +152,41 @@ export async function listFiles(folderId: string): Promise<RemoteFile[]> {
   return out;
 }
 
+/** フォルダ内で名前が一致するファイルの id。なければ null */
+export async function findFile(folderId: string, name: string): Promise<string | null> {
+  const q = encodeURIComponent(
+    `'${folderId}' in parents and name='${name.replace(/'/g, "\\'")}' and trashed=false`,
+  );
+  const j = (await (await api(`/files?q=${q}&fields=files(id)&pageSize=1`)).json()) as {
+    files: { id: string }[];
+  };
+  return j.files[0]?.id ?? null;
+}
+
+export async function downloadJson<T>(fileId: string): Promise<T> {
+  const res = await api(`/files/${fileId}?alt=media`);
+  return (await res.json()) as T;
+}
+
+/** JSON を書く。fileId があれば上書き、なければ作成。戻り値はファイル id */
+export async function uploadJson(
+  folderId: string,
+  name: string,
+  fileId: string | null,
+  value: unknown,
+): Promise<string> {
+  const meta = fileId ? { name } : { name, parents: [folderId], mimeType: 'application/json' };
+  const body = new FormData();
+  body.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+  body.append('file', new Blob([JSON.stringify(value)], { type: 'application/json' }));
+  const res = await api(
+    fileId ? `/files/${fileId}?uploadType=multipart&fields=id` : '/files?uploadType=multipart&fields=id',
+    { method: fileId ? 'PATCH' : 'POST', body },
+    UPLOAD,
+  );
+  return ((await res.json()) as { id: string }).id;
+}
+
 export async function download(fileId: string): Promise<ArrayBuffer> {
   const res = await api(`/files/${fileId}?alt=media`);
   return res.arrayBuffer();

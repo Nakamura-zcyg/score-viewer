@@ -23,7 +23,12 @@ import {
 import { extractVideoId, fetchTitle } from './youtube.ts';
 import { countPages } from './pdf.ts';
 import * as drive from './drive.ts';
-import { downloadFromDrive, uploadToDrive, type SyncProgress } from './sync.ts';
+import {
+  downloadFromDrive,
+  removeVideoFromDrive,
+  uploadToDrive,
+  type SyncProgress,
+} from './sync.ts';
 
 interface Props {
   onOpen: (id: number) => void;
@@ -63,6 +68,8 @@ function progressText(p: SyncProgress): string {
       return `アップロード ${p.current}/${p.total}: ${p.name}`;
     case 'download':
       return `ダウンロード ${p.current}/${p.total}: ${p.name}`;
+    case 'videos':
+      return '動画の一覧を同期中…';
     case 'done':
       return '完了';
   }
@@ -201,7 +208,21 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
   };
 
   const onDeleteVideo = async (v: VideoMeta) => {
-    if (!confirm(`「${v.name}」を一覧から削除しますか？`)) return;
+    if (!confirm(`「${v.name}」をこの端末の一覧から削除しますか？`)) return;
+    if (drive.isConfigured() && v.synced && !v.driveMissing) {
+      const alsoDrive = confirm(
+        `Drive の一覧からも「${v.name}」を外しますか？\n` +
+          'キャンセルすると Drive には残ります（他の端末からは引き続きダウンロードできます）。',
+      );
+      if (alsoDrive) {
+        try {
+          await removeVideoFromDrive(v.videoId);
+        } catch (e) {
+          alert(`Drive 側を更新できなかったので中止しました。\n${e}`);
+          return;
+        }
+      }
+    }
     await deleteVideo(v.id);
     refresh();
   };
@@ -252,13 +273,15 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
       const skipped = r.skippedMissing
         ? `、Drive で削除済みのため上げなかったもの ${r.skippedMissing}`
         : '';
-      return `アップロード完了: ${r.uploaded} 件、名前変更 ${r.renamed}${skipped}`;
+      const vids = r.videosUploaded ? `、動画 ${r.videosUploaded}` : '';
+      return `アップロード完了: ${r.uploaded} 件、名前変更 ${r.renamed}${vids}${skipped}`;
     });
 
   const onDownload = () =>
     runSync('ダウンロード', async () => {
       const r = await downloadFromDrive(onProgress);
-      return `ダウンロード完了: ${r.downloaded} 件、名前変更 ${r.renamed}`;
+      const vids = r.videosDownloaded ? `、動画 ${r.videosDownloaded}` : '';
+      return `ダウンロード完了: ${r.downloaded} 件、名前変更 ${r.renamed}${vids}`;
     });
 
   const driveOn = drive.isConfigured();
@@ -391,6 +414,7 @@ export default function Library({ onOpen, onOpenVideo, error, onClearError }: Pr
                   YouTube
                   {it.video.rate && it.video.rate !== 1 ? ` · ${it.video.rate}×` : ''}
                   {it.video.lastTime ? ` · 前回 ${formatTime(it.video.lastTime)}` : ''}
+                  {it.video.synced ? (it.video.driveMissing ? ' · Drive で削除済み' : ' · Drive') : ''}
                 </span>
               </button>
               <button
