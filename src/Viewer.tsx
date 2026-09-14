@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  setCropOverride,
   setCropPad,
   setCrops as saveCrops,
   setScrollSpeed,
@@ -167,16 +168,23 @@ export default function Viewer({ doc, onExit }: Props) {
   const [cropParams, setCropParamsState] = useState<CropParams>(() => ({
     dark: doc.cropParams?.dark ?? DEFAULT_CROP_PARAMS.dark,
     minInk: doc.cropParams?.minInk ?? DEFAULT_CROP_PARAMS.minInk,
+    maxGap: doc.cropParams?.maxGap ?? DEFAULT_CROP_PARAMS.maxGap,
   }));
   const [cropPadOverride, setCropPadOverride] = useState<number | undefined>(doc.cropParams?.pad);
+  // 古い解析結果（maxGap なし）は隙間規則で解析し直す
   const analyzedForRef = useRef<CropParams | null>(
-    doc.crops
+    doc.crops && doc.cropParams?.maxGap !== undefined
       ? {
-          dark: doc.cropParams?.dark ?? DEFAULT_CROP_PARAMS.dark,
-          minInk: doc.cropParams?.minInk ?? DEFAULT_CROP_PARAMS.minInk,
+          dark: doc.cropParams.dark,
+          minInk: doc.cropParams.minInk,
+          maxGap: doc.cropParams.maxGap,
         }
       : null,
   );
+  // ページ単位の手動上書き
+  const [cropOverrides, setCropOverrides] = useState<
+    Record<number, { top?: number; bottom?: number }>
+  >(doc.cropOverrides ?? {});
 
   const effMode: EffectiveMode =
     modeSetting === 'auto' ? (size.w > size.h ? 'half' : 'page') : modeSetting;
@@ -275,7 +283,14 @@ export default function Viewer({ doc, onExit }: Props) {
   useEffect(() => {
     if (!pdf || !isScroll || cropMode !== 'auto') return;
     const done = analyzedForRef.current;
-    if (crops && done && done.dark === cropParams.dark && done.minInk === cropParams.minInk) return;
+    if (
+      crops &&
+      done &&
+      done.dark === cropParams.dark &&
+      done.minInk === cropParams.minInk &&
+      done.maxGap === cropParams.maxGap
+    )
+      return;
     let alive = true;
     // スライダー操作が続いている間は待つ
     const timer = window.setTimeout(() => {
@@ -304,11 +319,33 @@ export default function Viewer({ doc, onExit }: Props) {
   }, [pdf, isScroll, cropMode, crops, cropParams, doc.id, doc.pageCount]);
 
   const setCropDark = (dark: number) => setCropParamsState((p) => ({ ...p, dark }));
+  const setCropGap = (maxGap: number) => setCropParamsState((p) => ({ ...p, maxGap }));
   const changeCropPad = (pad: number | undefined) => {
     setCropPadOverride(pad);
     setCropPad(doc.id, pad).catch(() => undefined);
   };
   const effectiveCropPad = cropPadOverride ?? settings.cropPadPercent;
+
+  // 自動解析の結果に、ページ単位の手動上書きをかぶせる
+  const effectiveCrops = useMemo<PageCrop[] | null>(() => {
+    if (!crops) return null;
+    if (!Object.keys(cropOverrides).length) return crops;
+    return crops.map((c, i) => {
+      const o = cropOverrides[i + 1];
+      return o ? { top: o.top ?? c.top, bottom: o.bottom ?? c.bottom } : c;
+    });
+  }, [crops, cropOverrides]);
+
+  const changeCropOverride = (page: number, patch: { top?: number; bottom?: number } | undefined) => {
+    setCropOverrides((all) => {
+      const next = { ...all };
+      const merged = patch ? { ...(all[page] ?? {}), ...patch } : undefined;
+      if (merged && (merged.top !== undefined || merged.bottom !== undefined)) next[page] = merged;
+      else delete next[page];
+      setCropOverride(doc.id, page, next[page]).catch(() => undefined);
+      return next;
+    });
+  };
 
   // ---- 速度の保存（曲ごと + 次に開く曲の既定値） ----
   useEffect(() => {
@@ -673,7 +710,7 @@ export default function Viewer({ doc, onExit }: Props) {
           pageCount={doc.pageCount}
           dims={dims}
           size={size}
-          crops={cropMode === 'auto' ? crops : null}
+          crops={cropMode === 'auto' ? effectiveCrops : null}
           cropPad={effectiveCropPad / 100}
           startPage={pos.page}
           jump={jump}
@@ -866,6 +903,33 @@ export default function Viewer({ doc, onExit }: Props) {
                 </div>
                 <div className="row crop-row">
                   <label className="crop-label">
+                    離れた印を無視
+                    <span className="muted-inline">
+                      本体からこれ以上離れた小さな印（ページ番号など）は無視。0 で無効
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={0.5}
+                    value={Math.round(cropParams.maxGap * 200) / 2}
+                    onChange={(e) => setCropGap(Number(e.target.value) / 100)}
+                    aria-label="離れた印を無視する隙間"
+                  />
+                  <span className="speed">{Math.round(cropParams.maxGap * 200) / 2} %</span>
+                  {cropParams.maxGap !== DEFAULT_CROP_PARAMS.maxGap && (
+                    <button
+                      className="btn small"
+                      onClick={() => setCropGap(DEFAULT_CROP_PARAMS.maxGap)}
+                      title="既定に戻す"
+                    >
+                      既定
+                    </button>
+                  )}
+                </div>
+                <div className="row crop-row">
+                  <label className="crop-label">
                     残す余白
                     <span className="muted-inline">
                       {cropPadOverride === undefined ? '全体設定と同じ' : 'この楽譜だけの値'}
@@ -891,6 +955,63 @@ export default function Viewer({ doc, onExit }: Props) {
                     </button>
                   )}
                 </div>
+                {effectiveCrops && (
+                  <>
+                    <div className="row crop-row">
+                      <label className="crop-label">
+                        ページ {pos.page} の上端
+                        <span className="muted-inline">
+                          {cropOverrides[pos.page]?.top !== undefined ? '手動' : '自動'}
+                        </span>
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={60}
+                        step={0.5}
+                        value={Math.round(effectiveCrops[pos.page - 1].top * 200) / 2}
+                        onChange={(e) =>
+                          changeCropOverride(pos.page, { top: Number(e.target.value) / 100 })
+                        }
+                        aria-label="このページの上端"
+                      />
+                      <span className="speed">
+                        {Math.round(effectiveCrops[pos.page - 1].top * 200) / 2} %
+                      </span>
+                    </div>
+                    <div className="row crop-row">
+                      <label className="crop-label">
+                        ページ {pos.page} の下端
+                        <span className="muted-inline">
+                          {cropOverrides[pos.page]?.bottom !== undefined ? '手動' : '自動'}
+                        </span>
+                      </label>
+                      <input
+                        type="range"
+                        min={40}
+                        max={100}
+                        step={0.5}
+                        value={Math.round(effectiveCrops[pos.page - 1].bottom * 200) / 2}
+                        onChange={(e) =>
+                          changeCropOverride(pos.page, { bottom: Number(e.target.value) / 100 })
+                        }
+                        aria-label="このページの下端"
+                      />
+                      <span className="speed">
+                        {Math.round(effectiveCrops[pos.page - 1].bottom * 200) / 2} %
+                      </span>
+                      {cropOverrides[pos.page] && (
+                        <button
+                          className="btn small"
+                          onClick={() => changeCropOverride(pos.page, undefined)}
+                          title="このページを自動に戻す"
+                        >
+                          自動
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             )}
             <div className="row">
