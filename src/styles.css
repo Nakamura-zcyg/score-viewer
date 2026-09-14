@@ -501,3 +501,17 @@ body,
   color: var(--muted);
   min-width: 2em;
 }
+
+/* ---- 余白カットの調整 ---- */
+.panel .crop-row {
+  flex-wrap: nowrap;
+}
+.panel .crop-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 7em;
+  line-height: 1.2;
+}
+.panel .crop-label .muted-inline {
+  font-size: 11px;
+}

@@ -62,9 +62,15 @@ export interface PageCrop {
 
 // 余白検出: この幅 (px) に縮小して走査する。楽譜の段は太いので粗くて足りる
 const CROP_SCAN_WIDTH = 160;
-// 1 行に暗い画素がこれ以上あれば「内容あり」。スキャンのゴミを無視する
-const CROP_MIN_INK = 3;
-const CROP_DARK = 160;
+
+/** 余白検出のパラメータ。楽譜ごとに変えられる */
+export interface CropParams {
+  /** 明度がこれ未満の画素を「インク」とみなす (0〜255)。大きいほど薄い線も拾う */
+  dark: number;
+  /** 1 行にインク画素がこれ以上あれば「内容あり」。スキャンのゴミを無視する */
+  minInk: number;
+}
+export const DEFAULT_CROP_PARAMS: CropParams = { dark: 160, minInk: 3 };
 
 /**
  * 全ページの上下余白を検出する。各ページを小さく描いて、暗い画素のある最初と最後の行を探す。
@@ -72,8 +78,10 @@ const CROP_DARK = 160;
  */
 export async function analyzeCrops(
   doc: PDFDocumentProxy,
+  params: CropParams,
   onProgress?: (done: number, total: number) => void,
 ): Promise<PageCrop[]> {
+  const { dark, minInk } = params;
   const out: PageCrop[] = [];
   const n = doc.numPages;
   for (let p = 1; p <= n; p++) {
@@ -98,9 +106,9 @@ export async function analyzeCrops(
       const row = y * w * 4;
       for (let x = 0; x < w; x++) {
         // 明度の近似として G チャンネルを見る
-        if (px[row + x * 4 + 1] < CROP_DARK && ++ink >= CROP_MIN_INK) break;
+        if (px[row + x * 4 + 1] < dark && ++ink >= minInk) break;
       }
-      if (ink >= CROP_MIN_INK) {
+      if (ink >= minInk) {
         if (first < 0) first = y;
         last = y;
       }

@@ -10,12 +10,20 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { setCrops as saveCrops, setScrollSpeed, updateLastPage, type DocRecord } from './db.ts';
+import {
+  setCropPad,
+  setCrops as saveCrops,
+  setScrollSpeed,
+  updateLastPage,
+  type DocRecord,
+} from './db.ts';
 import {
   analyzeCrops,
+  DEFAULT_CROP_PARAMS,
   loadPdf,
   pageSize,
   renderPage,
+  type CropParams,
   type PageCrop,
   type PDFDocumentProxy,
 } from './pdf.ts';
@@ -155,6 +163,20 @@ export default function Viewer({ doc, onExit }: Props) {
   const [cropMode, setCropMode] = useState<CropMode>(loadCropMode);
   const [crops, setCrops] = useState<PageCrop[] | null>(doc.crops ?? null);
   const [analyzing, setAnalyzing] = useState<string | null>(null);
+  // 楽譜ごとの余白カット調整。crops がどのパラメータで解析されたかも持つ
+  const [cropParams, setCropParamsState] = useState<CropParams>(() => ({
+    dark: doc.cropParams?.dark ?? DEFAULT_CROP_PARAMS.dark,
+    minInk: doc.cropParams?.minInk ?? DEFAULT_CROP_PARAMS.minInk,
+  }));
+  const [cropPadOverride, setCropPadOverride] = useState<number | undefined>(doc.cropParams?.pad);
+  const analyzedForRef = useRef<CropParams | null>(
+    doc.crops
+      ? {
+          dark: doc.cropParams?.dark ?? DEFAULT_CROP_PARAMS.dark,
+          minInk: doc.cropParams?.minInk ?? DEFAULT_CROP_PARAMS.minInk,
+        }
+      : null,
+  );
 
   const effMode: EffectiveMode =
     modeSetting === 'auto' ? (size.w > size.h ? 'half' : 'page') : modeSetting;
@@ -249,29 +271,44 @@ export default function Viewer({ doc, onExit }: Props) {
     }
   }, [cropMode]);
 
-  // ---- 余白の解析（スクロールモードで初めて必要になった時に 1 回。結果は曲に保存） ----
+  // ---- 余白の解析（スクロールモードで必要になった時と、閾値を変えた時。結果は曲に保存） ----
   useEffect(() => {
-    if (!pdf || !isScroll || cropMode !== 'auto' || crops) return;
+    if (!pdf || !isScroll || cropMode !== 'auto') return;
+    const done = analyzedForRef.current;
+    if (crops && done && done.dark === cropParams.dark && done.minInk === cropParams.minInk) return;
     let alive = true;
-    setAnalyzing(`余白を解析中 0/${doc.pageCount}`);
-    analyzeCrops(pdf, (done, total) => {
-      if (alive) setAnalyzing(`余白を解析中 ${done}/${total}`);
-    })
-      .then((result) => {
-        if (!alive) return;
-        setCrops(result);
-        saveCrops(doc.id, result).catch(() => undefined);
+    // スライダー操作が続いている間は待つ
+    const timer = window.setTimeout(() => {
+      setAnalyzing(`余白を解析中 0/${doc.pageCount}`);
+      const params = { ...cropParams };
+      analyzeCrops(pdf, params, (n, total) => {
+        if (alive) setAnalyzing(`余白を解析中 ${n}/${total}`);
       })
-      .catch(() => {
-        if (alive) setCropMode('none');
-      })
-      .finally(() => {
-        if (alive) setAnalyzing(null);
-      });
+        .then((result) => {
+          if (!alive) return;
+          analyzedForRef.current = params;
+          setCrops(result);
+          saveCrops(doc.id, result, params).catch(() => undefined);
+        })
+        .catch(() => {
+          if (alive) setCropMode('none');
+        })
+        .finally(() => {
+          if (alive) setAnalyzing(null);
+        });
+    }, 400);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
-  }, [pdf, isScroll, cropMode, crops, doc.id, doc.pageCount]);
+  }, [pdf, isScroll, cropMode, crops, cropParams, doc.id, doc.pageCount]);
+
+  const setCropDark = (dark: number) => setCropParamsState((p) => ({ ...p, dark }));
+  const changeCropPad = (pad: number | undefined) => {
+    setCropPadOverride(pad);
+    setCropPad(doc.id, pad).catch(() => undefined);
+  };
+  const effectiveCropPad = cropPadOverride ?? settings.cropPadPercent;
 
   // ---- 速度の保存（曲ごと + 次に開く曲の既定値） ----
   useEffect(() => {
@@ -637,6 +674,7 @@ export default function Viewer({ doc, onExit }: Props) {
           dims={dims}
           size={size}
           crops={cropMode === 'auto' ? crops : null}
+          cropPad={effectiveCropPad / 100}
           startPage={pos.page}
           jump={jump}
           running={running}
@@ -794,12 +832,66 @@ export default function Viewer({ doc, onExit }: Props) {
                 </label>
                 <span className="muted-inline">
                   {cropMode === 'auto'
-                    ? crops
-                      ? '解析済み'
-                      : analyzing ?? '未解析'
+                    ? analyzing ?? (crops ? '解析済み' : '未解析')
                     : 'ページをそのまま並べる'}
                 </span>
               </div>
+            )}
+            {isScroll && cropMode === 'auto' && (
+              <>
+                <div className="row crop-row">
+                  <label className="crop-label">
+                    暗さの閾値
+                    <span className="muted-inline">切れ過ぎるなら上げる（薄い線も内容とみなす）</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={40}
+                    max={240}
+                    step={5}
+                    value={cropParams.dark}
+                    onChange={(e) => setCropDark(Number(e.target.value))}
+                    aria-label="暗さの閾値"
+                  />
+                  <span className="speed">{cropParams.dark}</span>
+                  {cropParams.dark !== DEFAULT_CROP_PARAMS.dark && (
+                    <button
+                      className="btn small"
+                      onClick={() => setCropDark(DEFAULT_CROP_PARAMS.dark)}
+                      title="既定に戻す"
+                    >
+                      既定
+                    </button>
+                  )}
+                </div>
+                <div className="row crop-row">
+                  <label className="crop-label">
+                    残す余白
+                    <span className="muted-inline">
+                      {cropPadOverride === undefined ? '全体設定と同じ' : 'この楽譜だけの値'}
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={0.5}
+                    value={effectiveCropPad}
+                    onChange={(e) => changeCropPad(Number(e.target.value))}
+                    aria-label="残す余白"
+                  />
+                  <span className="speed">{effectiveCropPad} %</span>
+                  {cropPadOverride !== undefined && (
+                    <button
+                      className="btn small"
+                      onClick={() => changeCropPad(undefined)}
+                      title="全体設定に戻す"
+                    >
+                      全体
+                    </button>
+                  )}
+                </div>
+              </>
             )}
             <div className="row">
               <button className="btn with-icon" onClick={toggleFullscreen}>

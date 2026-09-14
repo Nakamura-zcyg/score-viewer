@@ -18,6 +18,8 @@ export interface DocMeta {
   scrollSpeed?: number;
   /** 各ページの内容がある縦範囲（割合）。余白カット用。未解析なら undefined */
   crops?: { top: number; bottom: number }[];
+  /** 余白カットの楽譜ごとの調整。crops はこの dark/minInk で解析したもの。pad は残す余白 % の上書き */
+  cropParams?: { dark: number; minInk: number; pad?: number };
 }
 
 export interface DocRecord extends DocMeta {
@@ -166,9 +168,23 @@ export function linkDrive(id: number, driveId: string): Promise<void> {
   });
 }
 
-export function setCrops(id: number, crops: { top: number; bottom: number }[]): Promise<void> {
+export function setCrops(
+  id: number,
+  crops: { top: number; bottom: number }[],
+  params: { dark: number; minInk: number },
+): Promise<void> {
   return patch(id, (r) => {
     r.crops = crops;
+    r.cropParams = { ...(r.cropParams ?? {}), dark: params.dark, minInk: params.minInk };
+  });
+}
+
+/** 楽譜ごとの「残す余白 %」。undefined で全体設定に戻す */
+export function setCropPad(id: number, pad: number | undefined): Promise<void> {
+  return patch(id, (r) => {
+    const base = r.cropParams ?? { dark: 160, minInk: 3 };
+    r.cropParams = { dark: base.dark, minInk: base.minInk };
+    if (pad !== undefined) r.cropParams.pad = pad;
   });
 }
 

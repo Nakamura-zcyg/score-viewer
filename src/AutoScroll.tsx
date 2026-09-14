@@ -13,6 +13,8 @@ interface Props {
   size: { w: number; h: number };
   /** 各ページの内容範囲。null なら余白を切らない */
   crops: PageCrop[] | null;
+  /** 余白を切るとき、内容の上下に残す余白（ページ高さに対する割合 0〜1） */
+  cropPad: number;
   startPage: number;
   /** ページ指定ジャンプ。seq が変わるたびに適用 */
   jump: { page: number; seq: number } | null;
@@ -97,6 +99,7 @@ export default function AutoScroll({
   dims,
   size,
   crops,
+  cropPad,
   startPage,
   jump,
   running,
@@ -109,7 +112,6 @@ export default function AutoScroll({
   menuOpen,
 }: Props) {
   const settings = useSettings();
-  const cropPad = settings.cropPadPercent / 100;
   const layout = useMemo(
     () => computeLayout(size, dims, pageCount, crops, cropPad),
     [size, dims, pageCount, crops, cropPad],
