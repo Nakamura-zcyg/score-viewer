@@ -14,9 +14,11 @@ import {
   setCropOverride,
   setCropPad,
   setCrops as saveCrops,
+  setJumps,
   setScrollSpeed,
   updateLastPage,
   type DocRecord,
+  type Jump,
 } from './db.ts';
 import {
   analyzeCrops,
@@ -28,7 +30,7 @@ import {
   type PageCrop,
   type PDFDocumentProxy,
 } from './pdf.ts';
-import AutoScroll from './AutoScroll.tsx';
+import AutoScroll, { READ_LINE } from './AutoScroll.tsx';
 import { useWakeLock } from './useWakeLock.ts';
 import { useSettings } from './settings.ts';
 
@@ -161,6 +163,11 @@ export default function Viewer({ doc, onExit }: Props) {
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(() => loadSpeed(doc));
   const [jump, setJump] = useState<{ page: number; seq: number } | null>(null);
+  // 反復ジャンプ
+  const [jumps, setJumpsState] = useState<Jump[]>(doc.jumps ?? []);
+  const [pendingFrom, setPendingFrom] = useState<{ page: number; frac: number } | null>(null);
+  const firedRef = useRef(new Map<string, number>());
+  const readPosRef = useRef({ page: doc.lastPage, frac: 0 });
   const [cropMode, setCropMode] = useState<CropMode>(loadCropMode);
   const [crops, setCrops] = useState<PageCrop[] | null>(doc.crops ?? null);
   const [analyzing, setAnalyzing] = useState<string | null>(null);
@@ -472,14 +479,89 @@ export default function Viewer({ doc, onExit }: Props) {
     [doc.pageCount],
   );
 
+  // ---- 反復ジャンプ ----
+  const jumpsRef = useRef(jumps);
+  jumpsRef.current = jumps;
+  const tryJump = useCallback((id: string) => {
+    const j = jumpsRef.current.find((x) => x.id === id);
+    if (!j) return false;
+    const n = firedRef.current.get(id) ?? 0;
+    if (n >= j.times) return false;
+    firedRef.current.set(id, n + 1);
+    return true;
+  }, []);
+  const onJumped = useCallback((j: Jump) => {
+    setIndicator(`反復 → p${j.toPage}`);
+  }, []);
+  const resetJumpCounts = useCallback(() => {
+    firedRef.current.clear();
+    setIndicator('ジャンプ回数をリセット');
+  }, []);
+  /** ページ内の割合 → そのモードでの表示スライス（割合の位置が見えるスライス） */
+  const sliceFor = useCallback((frac: number) => {
+    const l = layoutRef.current;
+    if (!l) return 0;
+    const y = frac * l.pageH;
+    let s = 0;
+    for (let i = 0; i < l.slices.length; i++) if (l.slices[i] <= y) s = i;
+    return s;
+  }, []);
+  /** 今の読み位置 */
+  const currentReadPos = useCallback((): { page: number; frac: number } => {
+    if (isScroll) return readPosRef.current;
+    const l = layoutRef.current;
+    const cur = posRef.current;
+    const frac = l ? (l.slices[cur.slice] ?? 0) / l.pageH : 0;
+    return { page: cur.page, frac };
+  }, [isScroll]);
+  const saveJumps = useCallback(
+    (next: Jump[]) => {
+      setJumpsState(next);
+      setJumps(doc.id, next).catch(() => undefined);
+    },
+    [doc.id],
+  );
+  const markJumpHere = useCallback(() => {
+    const here = currentReadPos();
+    if (!pendingFrom) {
+      setPendingFrom(here);
+      setMenuOpen(false);
+      setIndicator('行き先まで動かして「ここへ」');
+      return;
+    }
+    const j: Jump = {
+      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      fromPage: pendingFrom.page,
+      fromFrac: pendingFrom.frac,
+      toPage: here.page,
+      toFrac: here.frac,
+      times: 1,
+    };
+    saveJumps([...jumps, j]);
+    setPendingFrom(null);
+    setIndicator(`ジャンプを追加: p${j.fromPage} → p${j.toPage}`);
+  }, [currentReadPos, pendingFrom, jumps, saveJumps]);
+  const describePos = (p: { page: number; frac: number }) =>
+    `p${p.page} ${Math.round(p.frac * 100)}%`;
+
   const next = useCallback(() => {
     const cur = posRef.current;
     if (isScroll) return jumpToPage(cur.page + 1);
     const n = layoutRef.current?.slices.length ?? 1;
+    // 起点のあるページの最後のスライスで「次へ」→ 行き先へ
+    if (cur.slice + 1 >= n) {
+      for (const j of jumpsRef.current) {
+        if (j.fromPage === cur.page && tryJump(j.id)) {
+          moveTo({ page: Math.min(Math.max(j.toPage, 1), doc.pageCount), slice: sliceFor(j.toFrac) });
+          setIndicator(`反復 → p${j.toPage}`);
+          return;
+        }
+      }
+    }
     if (cur.slice + 1 < n) return moveTo({ page: cur.page, slice: cur.slice + 1 });
     if (cur.page < doc.pageCount) return moveTo({ page: cur.page + 1, slice: 0 });
     setIndicator('最後のページ');
-  }, [doc.pageCount, moveTo, isScroll, jumpToPage]);
+  }, [doc.pageCount, moveTo, isScroll, jumpToPage, tryJump, sliceFor]);
 
   const prev = useCallback(() => {
     const cur = posRef.current;
@@ -722,6 +804,11 @@ export default function Viewer({ doc, onExit }: Props) {
           onMenu={openMenu}
           onNudge={onNudge}
           menuOpen={menuOpen}
+          jumps={jumps}
+          tryJump={tryJump}
+          onJumped={onJumped}
+          readPosRef={readPosRef}
+          showGuide={pendingFrom !== null}
         />
       ) : (
         <canvas ref={canvasRef} className="page-canvas" />
@@ -1014,6 +1101,82 @@ export default function Viewer({ doc, onExit }: Props) {
                 )}
               </>
             )}
+            <div className="jump-section">
+              <div className="row">
+                <span className="jump-title">反復ジャンプ</span>
+                <span className="muted-inline">
+                  {isScroll
+                    ? `読み位置（画面上から ${Math.round(READ_LINE * 100)}%）が起点を通ると行き先へ`
+                    : '起点のページで「次へ」を押すと行き先へ'}
+                </span>
+              </div>
+              {jumps.length > 0 && (
+                <ul className="jump-list">
+                  {jumps.map((j, i) => (
+                    <li key={j.id}>
+                      <span className="jump-desc">
+                        {i + 1}. {describePos({ page: j.fromPage, frac: j.fromFrac })} →{' '}
+                        {describePos({ page: j.toPage, frac: j.toFrac })}
+                        <span className="muted-inline">
+                          {' '}
+                          残り {Math.max(0, j.times - (firedRef.current.get(j.id) ?? 0))} 回
+                        </span>
+                      </span>
+                      <label className="jump-times">
+                        回数{' '}
+                        <select
+                          value={j.times}
+                          onChange={(e) =>
+                            saveJumps(
+                              jumps.map((x) =>
+                                x.id === j.id ? { ...x, times: Number(e.target.value) } : x,
+                              ),
+                            )
+                          }
+                        >
+                          {[1, 2, 3, 4, 5, 9].map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="btn small danger"
+                        onClick={() => saveJumps(jumps.filter((x) => x.id !== j.id))}
+                        title="このジャンプを削除"
+                      >
+                        削除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="row">
+                {pendingFrom ? (
+                  <>
+                    <span className="muted-inline">起点: {describePos(pendingFrom)}</span>
+                    <button className="btn primary" onClick={markJumpHere}>
+                      ここへ（{describePos(currentReadPos())}）
+                    </button>
+                    <button className="btn small" onClick={() => setPendingFrom(null)}>
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn" onClick={markJumpHere}>
+                      ここから（{describePos(currentReadPos())}）
+                    </button>
+                    {jumps.length > 0 && (
+                      <button className="btn small" onClick={resetJumpCounts}>
+                        回数リセット
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
             <div className="row">
               <button className="btn with-icon" onClick={toggleFullscreen}>
                 <Maximize2 size={20} /> 全画面切替

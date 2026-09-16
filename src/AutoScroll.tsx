@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import type { Jump } from './db.ts';
 import { renderPage, type PageCrop, type PDFDocumentProxy } from './pdf.ts';
 import { useSettings } from './settings.ts';
 
@@ -30,7 +31,19 @@ interface Props {
   /** 上下タップで送った／戻した時の通知（秒。負なら戻し） */
   onNudge: (seconds: number) => void;
   menuOpen: boolean;
+  /** 反復ジャンプ */
+  jumps: Jump[];
+  /** 起点を通過した時に呼ぶ。飛んでよければ true（回数の管理は呼び出し側） */
+  tryJump: (id: string) => boolean;
+  onJumped: (j: Jump) => void;
+  /** 今の読み位置（画面上部から READ_LINE の位置）を書き込む */
+  readPosRef: MutableRefObject<{ page: number; frac: number }>;
+  /** 読み位置の目安線を表示する（ジャンプ作成中） */
+  showGuide: boolean;
 }
+
+/** 「読んでいる行」とみなす画面上の位置（画面高さに対する割合） */
+export const READ_LINE = 0.3;
 
 // 上下タップの送りのアニメーション時間（送る量は設定の秒数 × 速度）
 const NUDGE_ANIM_MS = 250;
@@ -110,6 +123,11 @@ export default function AutoScroll({
   onMenu,
   onNudge,
   menuOpen,
+  jumps,
+  tryJump,
+  onJumped,
+  readPosRef,
+  showGuide,
 }: Props) {
   const settings = useSettings();
   const layout = useMemo(
@@ -131,6 +149,19 @@ export default function AutoScroll({
 
   const clampY = useCallback((y: number, l: Layout) => Math.min(Math.max(y, 0), l.maxY), []);
 
+  /** ページ内の位置（余白カット前の割合）→ 帯の中の y (px) */
+  const posToStripY = useCallback((l: Layout, page: number, frac: number) => {
+    const i = Math.min(Math.max(page, 1), l.tops.length) - 1;
+    const within = Math.min(Math.max(frac * l.pageH - l.hidden[i], 0), l.heights[i]);
+    return l.tops[i] + within;
+  }, []);
+  /** 帯の中の y (px) → ページ内の位置 */
+  const stripYToPos = useCallback((l: Layout, y: number) => {
+    const page = pageAt(l, y);
+    const frac = (y - l.tops[page - 1] + l.hidden[page - 1]) / l.pageH;
+    return { page, frac: Math.min(Math.max(frac, 0), 1) };
+  }, []);
+
   /** transform を更新し、描画ウィンドウと現在ページを再計算 */
   const apply = useCallback(() => {
     const l = layoutRef.current;
@@ -145,13 +176,14 @@ export default function AutoScroll({
       winRef.current = { first, last };
       setWin(winRef.current);
     }
-    // 画面上部から 30% の位置にあるページを「現在ページ」とする
-    const cur = pageAt(l, y + H * 0.3);
-    if (cur !== lastPageRef.current) {
-      lastPageRef.current = cur;
-      onPage(cur);
+    // 画面上部から READ_LINE の位置を読み位置とし、そのページを「現在ページ」とする
+    const read = stripYToPos(l, y + H * READ_LINE);
+    readPosRef.current = read;
+    if (read.page !== lastPageRef.current) {
+      lastPageRef.current = read.page;
+      onPage(read.page);
     }
-  }, [clampY, size.h, onPage]);
+  }, [clampY, size.h, onPage, stripYToPos, readPosRef]);
 
   // ---- レイアウト変更: 同じページ内の同じ位置に留まる。初回は startPage の先頭 ----
   useEffect(() => {
@@ -218,7 +250,18 @@ export default function AutoScroll({
       const dt = Math.min((t - last) / 1000, 0.1); // タブ復帰時の飛びを抑える
       last = t;
       const l = layoutRef.current;
-      const next = (yRef.current ?? 0) + speed * dt;
+      const prevY = yRef.current ?? 0;
+      let next = prevY + speed * dt;
+      // 反復ジャンプ: 読み位置が起点を通過したら行き先へ
+      const readOff = size.h * READ_LINE;
+      for (const j of jumps) {
+        const fromY = posToStripY(l, j.fromPage, j.fromFrac);
+        if (prevY + readOff < fromY && next + readOff >= fromY && tryJump(j.id)) {
+          next = posToStripY(l, j.toPage, j.toFrac) - readOff;
+          onJumped(j);
+          break;
+        }
+      }
       const atEnd = next >= l.maxY;
       yRef.current = atEnd ? l.maxY : next;
       apply();
@@ -230,7 +273,7 @@ export default function AutoScroll({
     };
     id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [running, speed, apply, onEnd]);
+  }, [running, speed, apply, onEnd, jumps, tryJump, onJumped, posToStripY, size.h]);
 
   // ---- ジェスチャ: タップ=再生/停止、長押し=メニュー、ドラッグ=手動スクロール ----
   const gRef = useRef<{
@@ -394,8 +437,34 @@ export default function AutoScroll({
             src={cacheRef.current.get(p) ?? null}
           />
         ))}
+        {jumps.map((j, i) => (
+          <JumpMarks
+            key={j.id}
+            index={i + 1}
+            fromY={posToStripY(layout, j.fromPage, j.fromFrac)}
+            toY={posToStripY(layout, j.toPage, j.toFrac)}
+          />
+        ))}
       </div>
+      {showGuide && (
+        <div className="read-guide" style={{ top: size.h * READ_LINE }}>
+          ここが読み位置
+        </div>
+      )}
     </div>
+  );
+}
+
+function JumpMarks({ index, fromY, toY }: { index: number; fromY: number; toY: number }) {
+  return (
+    <>
+      <div className="jump-mark from" style={{ top: fromY }}>
+        <span>{index} 起点</span>
+      </div>
+      <div className="jump-mark to" style={{ top: toY }}>
+        <span>{index} 行き先</span>
+      </div>
+    </>
   );
 }
 

@@ -22,6 +22,19 @@ export interface DocMeta {
   cropParams?: { dark: number; minInk: number; maxGap?: number; pad?: number };
   /** ページ番号 → 手動で決めた範囲（割合）。自動解析の結果より優先し、再解析でも消えない */
   cropOverrides?: Record<number, { top?: number; bottom?: number }>;
+  /** 反復記号用のジャンプ。起点を通過（またはそのページで「次へ」）したら行き先へ飛ぶ */
+  jumps?: Jump[];
+}
+
+/** ジャンプ。位置はページ番号と、ページ上端からの高さの割合 (0〜1、余白カット前のページ基準) */
+export interface Jump {
+  id: string;
+  fromPage: number;
+  fromFrac: number;
+  toPage: number;
+  toFrac: number;
+  /** 飛ぶ回数。1 番括弧なら 1。回数を使い切ったら通過する */
+  times: number;
 }
 
 export interface DocRecord extends DocMeta {
@@ -195,6 +208,13 @@ export function setCropPad(id: number, pad: number | undefined): Promise<void> {
 }
 
 /** ページ単位の手動範囲。value が undefined ならそのページの上書きを消す */
+export function setJumps(id: number, jumps: Jump[]): Promise<void> {
+  return patch(id, (r) => {
+    if (jumps.length) r.jumps = jumps;
+    else delete r.jumps;
+  });
+}
+
 export function setCropOverride(
   id: number,
   page: number,

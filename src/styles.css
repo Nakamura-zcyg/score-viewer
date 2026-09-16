@@ -515,3 +515,85 @@ body,
 .panel .crop-label .muted-inline {
   font-size: 11px;
 }
+
+/* ---- 反復ジャンプ ---- */
+.autoscroll .jump-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px dashed;
+  pointer-events: none;
+}
+.autoscroll .jump-mark.from {
+  border-color: rgba(230, 60, 60, 0.9);
+}
+.autoscroll .jump-mark.to {
+  border-color: rgba(40, 170, 90, 0.9);
+}
+.autoscroll .jump-mark span {
+  position: absolute;
+  right: 6px;
+  top: 2px;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #fff;
+  background: inherit;
+}
+.autoscroll .jump-mark.from span {
+  background: rgba(230, 60, 60, 0.9);
+}
+.autoscroll .jump-mark.to span {
+  background: rgba(40, 170, 90, 0.9);
+}
+.autoscroll .read-guide {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid rgba(61, 139, 253, 0.9);
+  pointer-events: none;
+  font-size: 12px;
+  color: #fff;
+  text-indent: 6px;
+  line-height: 18px;
+  text-shadow: 0 0 3px #000;
+}
+.panel .jump-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #333;
+  border-bottom: 1px solid #333;
+}
+.panel .jump-title {
+  font-weight: 600;
+}
+.panel .jump-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.panel .jump-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.panel .jump-desc {
+  flex: 1;
+  min-width: 10em;
+}
+.panel .jump-times select {
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #111;
+  color: var(--fg);
+}
