@@ -597,3 +597,78 @@ body,
   background: #111;
   color: var(--fg);
 }
+
+/* ---- メトロノーム ---- */
+.metro-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: #fff;
+  opacity: 0;
+}
+.metro-flash.on {
+  animation: metro-flash 120ms ease-out;
+}
+.metro-flash.on.accent {
+  animation: metro-flash-accent 160ms ease-out;
+}
+@keyframes metro-flash {
+  from {
+    opacity: 0.18;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes metro-flash-accent {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.metro-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  z-index: 5;
+}
+.metro-beats {
+  display: inline-flex;
+  gap: 4px;
+}
+.metro-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+}
+.metro-dot.on {
+  background: var(--accent);
+}
+.panel .bpm-input {
+  width: 4.5em;
+  font: inherit;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #111;
+  color: var(--fg);
+  text-align: right;
+}
+.panel .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

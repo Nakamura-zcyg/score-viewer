@@ -24,6 +24,17 @@ export interface DocMeta {
   cropOverrides?: Record<number, { top?: number; bottom?: number }>;
   /** 反復記号用のジャンプ。起点を通過（またはそのページで「次へ」）したら行き先へ飛ぶ */
   jumps?: Jump[];
+  /** メトロノームの設定（楽譜ごと） */
+  metronome?: MetronomeSettings;
+}
+
+export interface MetronomeSettings {
+  bpm: number;
+  beats: number;
+  accent: boolean;
+  flash: boolean;
+  /** 自動スクロールの速度を BPM から出すときの 1 ページあたりの小節数 */
+  measuresPerPage?: number;
 }
 
 /** ジャンプ。位置はページ番号と、ページ上端からの高さの割合 (0〜1、余白カット前のページ基準) */
@@ -226,6 +237,12 @@ export function setCropOverride(
     else delete next[page];
     if (Object.keys(next).length) r.cropOverrides = next;
     else delete r.cropOverrides;
+  });
+}
+
+export function setMetronome(id: number, m: MetronomeSettings): Promise<void> {
+  return patch(id, (r) => {
+    r.metronome = m;
   });
 }
 

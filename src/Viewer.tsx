@@ -15,11 +15,14 @@ import {
   setCropPad,
   setCrops as saveCrops,
   setJumps,
+  setMetronome as saveMetronome,
   setScrollSpeed,
   updateLastPage,
   type DocRecord,
   type Jump,
+  type MetronomeSettings,
 } from './db.ts';
+import { Metronome } from './metronome.ts';
 import {
   analyzeCrops,
   DEFAULT_CROP_PARAMS,
@@ -54,6 +57,11 @@ const SPEED_MIN = 5;
 const SPEED_MAX = 300;
 const SPEED_DEFAULT = 40;
 const SPEED_STEP = 1.15; // ± ボタン・キーでの倍率
+// メトロノーム
+const BPM_MIN = 30;
+const BPM_MAX = 240;
+const DEFAULT_METRONOME: MetronomeSettings = { bpm: 100, beats: 4, accent: true, flash: true };
+const METRO_BEATS = [2, 3, 4, 6];
 
 /** 繰りモード。auto は横向きなら half、縦向きなら page */
 type TurnMode = 'auto' | 'page' | 'half' | 'width' | 'scroll';
@@ -165,6 +173,17 @@ export default function Viewer({ doc, onExit }: Props) {
   const [jump, setJump] = useState<{ page: number; seq: number } | null>(null);
   // 反復ジャンプ
   const [jumps, setJumpsState] = useState<Jump[]>(doc.jumps ?? []);
+  // メトロノーム
+  const [metro, setMetro] = useState<MetronomeSettings>(() => ({
+    ...DEFAULT_METRONOME,
+    ...(doc.metronome ?? {}),
+  }));
+  const [metroRunning, setMetroRunning] = useState(false);
+  const [metroBeat, setMetroBeat] = useState(0);
+  const metronomeRef = useRef<Metronome | null>(null);
+  const flashRef = useRef<HTMLDivElement>(null);
+  const metroRef = useRef(metro);
+  metroRef.current = metro;
   const [pendingFrom, setPendingFrom] = useState<{ page: number; frac: number } | null>(null);
   const firedRef = useRef(new Map<string, number>());
   const readPosRef = useRef({ page: doc.lastPage, frac: 0 });
@@ -609,6 +628,62 @@ export default function Viewer({ doc, onExit }: Props) {
     setIndicator(seconds > 0 ? `${seconds} 秒送り` : `${-seconds} 秒戻し`);
   }, []);
 
+  // ---- メトロノーム ----
+  useEffect(() => {
+    const m = new Metronome(metroRef.current);
+    m.onBeat = (beat) => {
+      setMetroBeat(beat);
+      const f = flashRef.current;
+      if (f && metroRef.current.flash) {
+        f.classList.remove('on', 'accent');
+        void f.offsetWidth; // 連続する拍でもアニメーションを再開させる
+        f.classList.add('on');
+        if (beat === 0 && metroRef.current.accent) f.classList.add('accent');
+      }
+    };
+    metronomeRef.current = m;
+    return () => {
+      m.dispose();
+      metronomeRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    metronomeRef.current?.setConfig(metro);
+    const t = setTimeout(() => saveMetronome(doc.id, metro).catch(() => undefined), 400);
+    return () => clearTimeout(t);
+  }, [metro, doc.id]);
+  const toggleMetronome = useCallback(() => {
+    const m = metronomeRef.current;
+    if (!m) return;
+    if (m.running) {
+      m.stop();
+      setMetroRunning(false);
+      setIndicator('メトロノーム停止');
+    } else {
+      m.start();
+      setMetroRunning(true);
+      setIndicator(`♩= ${metroRef.current.bpm}`);
+    }
+  }, []);
+  const setBpm = (bpm: number) =>
+    setMetro((m) => ({ ...m, bpm: Math.round(Math.min(BPM_MAX, Math.max(BPM_MIN, bpm))) }));
+  /** BPM と 1 ページの小節数から自動スクロールの速度 (px/秒) を出す */
+  const speedFromBpm = useCallback(() => {
+    if (!dims) return null;
+    const mpp = metro.measuresPerPage;
+    if (!mpp || mpp <= 0) return null;
+    const scale = size.w / dims.w;
+    const pageH = dims.h * scale;
+    let avg = pageH + 8;
+    const cs = cropMode === 'auto' ? effectiveCrops : null;
+    if (cs && cs.length) {
+      const pad = effectiveCropPad / 100;
+      avg = (cs.reduce((a, c) => a + (c.bottom - c.top + 2 * pad), 0) / cs.length) * pageH;
+    }
+    const secondsPerPage = (mpp * metro.beats * 60) / metro.bpm;
+    return Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, avg / secondsPerPage)));
+  }, [dims, metro, size.w, cropMode, effectiveCrops, effectiveCropPad]);
+
   // ---- タップ／長押し判定（ページ・半ページ・横幅モード） ----
   const gestureRef = useRef<{
     id: number;
@@ -688,6 +763,12 @@ export default function Viewer({ doc, onExit }: Props) {
   // ---- キーボード（Bluetooth ペダル・外付けキー） ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if ((e.key === 'm' || e.key === 'M') && tag !== 'INPUT' && tag !== 'SELECT') {
+        e.preventDefault();
+        toggleMetronome();
+        return;
+      }
       if (menuOpen) {
         if (e.key === 'Escape') setMenuOpen(false);
         return;
@@ -746,10 +827,10 @@ export default function Viewer({ doc, onExit }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen, next, prev, isScroll, toggleRunning, changeSpeed]);
+  }, [menuOpen, next, prev, isScroll, toggleRunning, changeSpeed, toggleMetronome]);
 
   // ---- 画面消灯防止（1 時間無操作で解除。自動スクロール中は無操作に数えない） ----
-  useWakeLock(running);
+  useWakeLock(running || metroRunning);
 
   // ---- 右クリック／長押しメニュー抑止 ----
   useEffect(() => {
@@ -844,6 +925,25 @@ export default function Viewer({ doc, onExit }: Props) {
       )}
 
       <div className={'indicator' + (indicator ? ' show' : '')}>{indicator ?? ''}</div>
+
+      <div ref={flashRef} className="metro-flash" aria-hidden />
+      {metroRunning && (
+        <button
+          className="metro-badge"
+          onClick={toggleMetronome}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          title="タップで停止"
+          aria-label="メトロノームを停止"
+        >
+          ♩={metro.bpm}
+          <span className="metro-beats">
+            {Array.from({ length: metro.beats }, (_, i) => (
+              <span key={i} className={'metro-dot' + (i === metroBeat ? ' on' : '')} />
+            ))}
+          </span>
+        </button>
+      )}
 
       {menuOpen && (
         <div
@@ -1101,6 +1201,117 @@ export default function Viewer({ doc, onExit }: Props) {
                 )}
               </>
             )}
+            <div className="jump-section metro-section">
+              <div className="row">
+                <span className="jump-title">メトロノーム</span>
+                <button
+                  className={'btn' + (metroRunning ? ' primary' : '')}
+                  onClick={toggleMetronome}
+                >
+                  {metroRunning ? '停止' : '開始'}
+                </button>
+                <span className="muted-inline">キーボードの M でも開始／停止</span>
+              </div>
+              <div className="row crop-row">
+                <label className="crop-label">
+                  テンポ
+                  <span className="muted-inline">♩ = BPM</span>
+                </label>
+                <button className="btn icon" onClick={() => setBpm(metro.bpm - 1)} aria-label="遅く">
+                  <Minus size={20} />
+                </button>
+                <input
+                  type="range"
+                  min={BPM_MIN}
+                  max={BPM_MAX}
+                  step={1}
+                  value={metro.bpm}
+                  onChange={(e) => setBpm(Number(e.target.value))}
+                  aria-label="テンポ"
+                />
+                <button className="btn icon" onClick={() => setBpm(metro.bpm + 1)} aria-label="速く">
+                  <Plus size={20} />
+                </button>
+                <input
+                  type="number"
+                  className="bpm-input"
+                  min={BPM_MIN}
+                  max={BPM_MAX}
+                  value={metro.bpm}
+                  onChange={(e) => setBpm(Number(e.target.value))}
+                  aria-label="テンポの数値"
+                />
+              </div>
+              <div className="row">
+                <label>
+                  拍子{' '}
+                  <select
+                    value={metro.beats}
+                    onChange={(e) => setMetro((m) => ({ ...m, beats: Number(e.target.value) }))}
+                    aria-label="拍子"
+                  >
+                    {METRO_BEATS.map((b) => (
+                      <option key={b} value={b}>
+                        {b} 拍
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={metro.accent}
+                    onChange={(e) => setMetro((m) => ({ ...m, accent: e.target.checked }))}
+                  />{' '}
+                  1 拍目を強く
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={metro.flash}
+                    onChange={(e) => setMetro((m) => ({ ...m, flash: e.target.checked }))}
+                  />{' '}
+                  画面を点滅
+                </label>
+              </div>
+              {isScroll && (
+                <div className="row">
+                  <label>
+                    1 ページの小節数{' '}
+                    <input
+                      type="number"
+                      className="bpm-input"
+                      min={1}
+                      max={99}
+                      value={metro.measuresPerPage ?? ''}
+                      placeholder="例 16"
+                      onChange={(e) =>
+                        setMetro((m) => ({
+                          ...m,
+                          measuresPerPage: e.target.value ? Number(e.target.value) : undefined,
+                        }))
+                      }
+                      aria-label="1 ページの小節数"
+                    />
+                  </label>
+                  <button
+                    className="btn"
+                    disabled={speedFromBpm() === null}
+                    onClick={() => {
+                      const v = speedFromBpm();
+                      if (v !== null) {
+                        speedRef.current = v;
+                        setSpeed(v);
+                        setIndicator(`${v} px/秒`);
+                      }
+                    }}
+                    title="BPM と小節数から自動スクロールの速度を出す（近似）"
+                  >
+                    BPM から速度を設定{speedFromBpm() !== null ? `（${speedFromBpm()} px/秒）` : ''}
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="jump-section">
               <div className="row">
                 <span className="jump-title">反復ジャンプ</span>
