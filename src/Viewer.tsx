@@ -1244,11 +1244,13 @@ export default function Viewer({ doc, onExit }: Props) {
                 </button>
                 <span className="muted-inline">キーボードの M でも開始／停止</span>
               </div>
-              <div className="row crop-row">
+              <div className="row crop-row bpm-row">
                 <label className="crop-label">
                   テンポ
                   <span className="muted-inline">♩ = BPM</span>
                 </label>
+                {/* 幅が足りない時はこのまとまりごと次の行に落ちる（数値欄が見切れないように） */}
+                <div className="bpm-controls">
                 <button className="btn icon" onClick={() => setBpm(metro.bpm - 1)} aria-label="遅く">
                   <Minus size={20} />
                 </button>
@@ -1273,6 +1275,7 @@ export default function Viewer({ doc, onExit }: Props) {
                   onChange={(e) => setBpm(Number(e.target.value))}
                   aria-label="テンポの数値"
                 />
+                </div>
               </div>
               <div className="row">
                 <label>

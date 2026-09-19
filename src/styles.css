@@ -628,6 +628,29 @@ body,
 .panel .crop-label .muted-inline {
   font-size: 11px;
 }
+/* スライダー行では数値・ボタンを縮めず、スライダー側を縮める */
+.panel .crop-row .speed,
+.panel .crop-row .btn.icon,
+.panel .crop-row .bpm-input {
+  flex-shrink: 0;
+}
+.panel .crop-row input[type='range'] {
+  min-width: 60px;
+}
+.panel .crop-row .speed {
+  min-width: 3.5em; /* 3 桁＋単位なしなので 5em は要らない。3 列時に 5px はみ出していた */
+}
+/* テンポ行: ラベルと操作群が 1 行に収まらない幅では操作群を次の行へ */
+.panel .bpm-row {
+  flex-wrap: wrap;
+}
+.panel .bpm-controls {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* ---- 反復ジャンプ ---- */
 .autoscroll .jump-mark {
