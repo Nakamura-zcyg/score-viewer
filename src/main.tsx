@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
+import { setRegistration } from './updates.ts';
 import './styles.css';
 
 registerSW({
@@ -9,6 +10,10 @@ registerSW({
   // 初回のキャッシュ完了。以後はネットなしで起動できる
   onOfflineReady() {
     window.dispatchEvent(new CustomEvent('sw-offline-ready'));
+  },
+  // 設定画面の「最新版に更新」から registration.update() を呼ぶために保持する
+  onRegisteredSW(_url, reg) {
+    setRegistration(reg);
   },
 });
 

@@ -578,6 +578,42 @@ body,
   color: var(--muted);
   min-width: 2em;
 }
+.setting-app {
+  padding: 8px 16px 24px;
+  border-top: 1px solid #333;
+}
+.setting-app h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 8px 0 12px;
+}
+.setting-app-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.setting-app-row > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.setting-app code {
+  font-family: ui-monospace, monospace;
+  background: #262626;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* ---- 余白カットの調整 ---- */
 .panel .crop-row {
