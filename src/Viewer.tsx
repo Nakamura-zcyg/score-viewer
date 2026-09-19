@@ -197,6 +197,9 @@ export default function Viewer({ doc, onExit }: Props) {
     maxGap: doc.cropParams?.maxGap ?? DEFAULT_CROP_PARAMS.maxGap,
   }));
   const [cropPadOverride, setCropPadOverride] = useState<number | undefined>(doc.cropParams?.pad);
+  const cropParamsRef = useRef(cropParams);
+  cropParamsRef.current = cropParams;
+  const analysisSeqRef = useRef(0);
   // 古い解析結果（maxGap なし）は隙間規則で解析し直す
   const analyzedForRef = useRef<CropParams | null>(
     doc.crops && doc.cropParams?.maxGap !== undefined
@@ -317,32 +320,43 @@ export default function Viewer({ doc, onExit }: Props) {
       done.maxGap === cropParams.maxGap
     )
       return;
-    let alive = true;
     // スライダー操作が続いている間は待つ
     const timer = window.setTimeout(() => {
+      // 世代番号: 最新の解析だけが進捗表示を持ち、終わったら必ず消す。
+      // 途中でモードを切り替えても、表示が残らないようにする（user 報告 2026-09-19）
+      const seq = ++analysisSeqRef.current;
+      const latest = () => analysisSeqRef.current === seq;
       setAnalyzing(`余白を解析中 0/${doc.pageCount}`);
       const params = { ...cropParams };
+      const sameParams = () => {
+        const c = cropParamsRef.current;
+        return c.dark === params.dark && c.minInk === params.minInk && c.maxGap === params.maxGap;
+      };
       analyzeCrops(pdf, params, (n, total) => {
-        if (alive) setAnalyzing(`余白を解析中 ${n}/${total}`);
+        if (latest()) setAnalyzing(`余白を解析中 ${n}/${total}`);
       })
         .then((result) => {
-          if (!alive) return;
+          // 効果が破棄されていても、条件が今と同じなら結果を採用して再解析を省く
+          if (!sameParams()) return;
           analyzedForRef.current = params;
           setCrops(result);
           saveCrops(doc.id, result, params).catch(() => undefined);
         })
         .catch(() => {
-          if (alive) setCropMode('none');
+          if (latest()) setCropMode('none');
         })
         .finally(() => {
-          if (alive) setAnalyzing(null);
+          if (latest()) setAnalyzing(null);
         });
     }, 400);
     return () => {
-      alive = false;
       clearTimeout(timer);
     };
   }, [pdf, isScroll, cropMode, crops, cropParams, doc.id, doc.pageCount]);
+  // 解析が走っていない時に表示が残っていたら消す（保険）
+  useEffect(() => {
+    if (!isScroll || cropMode !== 'auto') setAnalyzing(null);
+  }, [isScroll, cropMode]);
 
   const setCropDark = (dark: number) => setCropParamsState((p) => ({ ...p, dark }));
   const setCropGap = (maxGap: number) => setCropParamsState((p) => ({ ...p, maxGap }));
@@ -954,8 +968,21 @@ export default function Viewer({ doc, onExit }: Props) {
             if (e.target === e.currentTarget) setMenuOpen(false);
           }}
         >
-          <div className="panel">
-            <div className="row title">{doc.name}</div>
+          <div className="panel menu">
+            <div className="panel-header">
+              <span className="title">{doc.name}</span>
+              <button
+                className="btn icon"
+                onClick={() => setMenuOpen(false)}
+                aria-label="閉じる"
+                title="閉じる"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <div className="menu-grid">
+            <section className="card">
+              <h3>ページ</h3>
             <div className="row">
               <button className="btn icon" onClick={prev} aria-label="前へ" title="前へ">
                 <ChevronLeft size={24} />
@@ -983,6 +1010,9 @@ export default function Viewer({ doc, onExit }: Props) {
                 </select>
               </label>
             </div>
+            </section>
+            <section className="card">
+              <h3>表示</h3>
             <div className="row">
               <label>
                 繰りモード{' '}
@@ -1062,7 +1092,8 @@ export default function Viewer({ doc, onExit }: Props) {
               </div>
             )}
             {isScroll && cropMode === 'auto' && (
-              <>
+              <details className="sub">
+                <summary>余白カットの調整（閾値・隙間・余白・ページごとの上下端）</summary>
                 <div className="row crop-row">
                   <label className="crop-label">
                     暗さの閾値
@@ -1199,9 +1230,10 @@ export default function Viewer({ doc, onExit }: Props) {
                     </div>
                   </>
                 )}
-              </>
+              </details>
             )}
-            <div className="jump-section metro-section">
+            </section>
+            <section className="card metro-section">
               <div className="row">
                 <span className="jump-title">メトロノーム</span>
                 <button
@@ -1311,8 +1343,8 @@ export default function Viewer({ doc, onExit }: Props) {
                   </button>
                 </div>
               )}
-            </div>
-            <div className="jump-section">
+            </section>
+            <section className="card jump-section">
               <div className="row">
                 <span className="jump-title">反復ジャンプ</span>
                 <span className="muted-inline">
@@ -1387,17 +1419,16 @@ export default function Viewer({ doc, onExit }: Props) {
                   </>
                 )}
               </div>
+            </section>
             </div>
-            <div className="row">
+            <div className="menu-footer">
               <button className="btn with-icon" onClick={toggleFullscreen}>
                 <Maximize2 size={20} /> 全画面切替
               </button>
               <button className="btn with-icon" onClick={onExit}>
                 <LibraryBig size={20} /> ライブラリ
               </button>
-            </div>
-            <div className="row">
-              <button className="btn primary wide with-icon" onClick={() => setMenuOpen(false)}>
+              <button className="btn primary with-icon" onClick={() => setMenuOpen(false)}>
                 <X size={20} /> 閉じる
               </button>
             </div>
