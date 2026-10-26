@@ -6,31 +6,63 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export type { PDFDocumentProxy };
+export { workerUrl };
 
 let workerReady: Promise<void> | null = null;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** ワーカーのコードを取り寄せる。fetch（SW 経由）→ Cache Storage 直読みの順に試す */
+async function fetchWorkerCode(): Promise<string> {
+  let lastError: unknown;
+  // SW はメモリ不足で殺されて応答し損ねることがある（タブレットで散発）ので、少し待って 3 回まで
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(workerUrl);
+      if (!res.ok) throw new Error(`worker ${res.status}`);
+      return await res.text();
+    } catch (e) {
+      lastError = e;
+      await sleep(300 * (attempt + 1));
+    }
+  }
+  // SW を介さずキャッシュを直接読む。SW が止まっていても、登録が消えていても、キャッシュさえ残っていれば届く
+  if ('caches' in window) {
+    const hit = await caches.match(workerUrl, { ignoreSearch: true }).catch(() => undefined);
+    if (hit) return await hit.text();
+  }
+  throw lastError ?? new Error('worker unavailable');
+}
 
 /**
  * ワーカーのコードを通常の fetch で取り寄せ、Blob URL から起動するようにする。
  * pdf.js はモジュール形式の Worker を URL 直指定で起動するが、その読み込みを
  * Service Worker が横取りしない環境があり、オフラインで「読み込み中」のまま止まる。
  * 通常の fetch は必ず Service Worker を通るので、キャッシュ済みなら圏外でも届く。
- * 取り寄せに失敗したら従来どおり URL 直指定に戻す。
+ * 取り寄せに失敗したら従来どおり URL 直指定に戻す（次回また試せるよう memo は捨てる）。
  */
 function ensureWorker(): Promise<void> {
   if (!workerReady) {
     workerReady = (async () => {
       try {
-        const res = await fetch(workerUrl);
-        if (!res.ok) throw new Error(`worker ${res.status}`);
-        const code = await res.text();
+        const code = await fetchWorkerCode();
         const blob = new Blob([code], { type: 'text/javascript' });
         pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
       } catch {
         pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+        workerReady = null;
       }
     })();
   }
   return workerReady;
+}
+
+/**
+ * 起動直後にワーカーをメモリへ載せておく。アプリを開いたまま圏外へ持ち出しても、
+ * その後に初めて PDF を開く時にキャッシュへ行かずに済む
+ */
+export function prewarmWorker(): void {
+  ensureWorker().catch(() => undefined);
 }
 
 /** ArrayBuffer から読み込む。pdf.js はバッファを worker に転送して使えなくするので複製を渡す */

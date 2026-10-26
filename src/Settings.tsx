@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { ArrowLeft, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, HardDrive, RefreshCw, RotateCcw } from 'lucide-react';
 import { APP_VERSION, BUILD_TIME, checkForUpdate, type UpdateResult } from './updates.ts';
+import { checkOffline, fileName, rebuildOffline, repairOffline, type OfflineStatus } from './offline.ts';
 import {
   DEFAULT_SETTINGS,
   resetSettings,
@@ -21,6 +22,18 @@ const UPDATE_MESSAGES: Record<UpdateResult, string> = {
   unsupported: 'この環境では更新確認できません（開発サーバーなど）',
 };
 
+function formatBytes(n: number | undefined): string {
+  if (n === undefined) return '不明';
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const SW_LABEL: Record<OfflineStatus['sw'], string> = {
+  controlled: '動作中（このページを制御）',
+  uncontrolled: '登録はあるが、このページを制御していない',
+  none: '登録なし',
+};
+
 function formatBuildTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -31,6 +44,61 @@ function formatBuildTime(iso: string): string {
 export default function Settings({ onExit }: Props) {
   const settings = useSettings();
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | UpdateResult>('idle');
+  const [offline, setOffline] = useState<OfflineStatus | null>(null);
+  const [offlineBusy, setOfflineBusy] = useState(false);
+  const [offlineMsg, setOfflineMsg] = useState<string | null>(null);
+
+  // 開いた時点の状態を出しておく（押さなくても欠けが分かるように）
+  useEffect(() => {
+    checkOffline().then(setOffline).catch(() => undefined);
+  }, []);
+
+  const repair = async () => {
+    setOfflineBusy(true);
+    setOfflineMsg(null);
+    try {
+      const before = await checkOffline();
+      if (before.missing.length === 0) {
+        setOffline(before);
+        setOfflineMsg('必要なファイルはすべてキャッシュにあります');
+        return;
+      }
+      if (!navigator.onLine) {
+        setOffline(before);
+        setOfflineMsg('欠けがありますが、オフラインなので補えません。ネットに繋いでからもう一度押してください');
+        return;
+      }
+      const r = await repairOffline();
+      const after = await checkOffline();
+      setOffline(after);
+      if (after.missing.length === 0) {
+        setOfflineMsg(`${r.added.length} 件を補いました。これでオフラインでも開けます`);
+      } else {
+        setOfflineMsg(
+          `補えなかったものがあります: ${after.missing.map(fileName).join('、')}。「作り直す」を試してください`,
+        );
+      }
+    } catch (e) {
+      setOfflineMsg(`点検に失敗しました: ${String(e)}`);
+    } finally {
+      setOfflineBusy(false);
+    }
+  };
+
+  const rebuild = () => {
+    if (!navigator.onLine) {
+      setOfflineMsg('作り直しはネットに繋いだ状態で行ってください');
+      return;
+    }
+    if (!confirm('オフライン用のキャッシュを捨てて、配信先から入れ直します。楽譜のデータは消えません。よろしいですか？')) {
+      return;
+    }
+    setOfflineBusy(true);
+    rebuildOffline().catch((e) => {
+      setOfflineMsg(`作り直しに失敗しました: ${String(e)}`);
+      setOfflineBusy(false);
+    });
+  };
   // 入力中の文字列は別に持ち、確定時（blur / Enter）に数値として保存する
   const [drafts, setDrafts] = useState<Partial<Record<keyof SettingsValues, string>>>({});
 
@@ -128,6 +196,43 @@ export default function Settings({ onExit }: Props) {
               ? '配信先を確認しています…'
               : UPDATE_MESSAGES[updateState]}
         </p>
+
+        <div className="setting-app-row offline-row">
+          <span>
+            <span className="setting-label">オフライン用キャッシュ</span>
+            <span className="setting-note">
+              {offline === null
+                ? '確認中…'
+                : offline.missing.length === 0
+                  ? `必要なファイルは揃っています（${offline.entries} 件）`
+                  : `欠けあり: ${offline.missing.map(fileName).join('、')}`}
+            </span>
+          </span>
+          <button className="btn with-icon" disabled={offlineBusy} onClick={repair}>
+            <HardDrive size={18} className={offlineBusy ? 'spin' : undefined} /> 確認して補う
+          </button>
+          <button className="btn" disabled={offlineBusy} onClick={rebuild}>
+            作り直す
+          </button>
+        </div>
+        {offline && (
+          <ul className="offline-detail muted small">
+            <li>Service Worker: {SW_LABEL[offline.sw]}</li>
+            <li>キャッシュ: {offline.cacheName ? `${offline.entries} 件` : 'なし'}</li>
+            <li>
+              永続ストレージ:{' '}
+              {offline.persisted === null ? '不明' : offline.persisted ? '許可済み' : '未許可（空き容量が減ると消されることがある）'}
+            </li>
+            <li>
+              使用量: {formatBytes(offline.usage)} / 上限 {formatBytes(offline.quota)}
+            </li>
+          </ul>
+        )}
+        {offlineMsg && (
+          <p className="muted small" aria-live="polite">
+            {offlineMsg}
+          </p>
+        )}
       </section>
     </section>
   );

@@ -600,6 +600,16 @@ body,
   flex-direction: column;
   gap: 2px;
 }
+.setting-app .offline-row {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #222;
+}
+.offline-detail {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+  line-height: 1.6;
+}
 .setting-app code {
   font-family: ui-monospace, monospace;
   background: #262626;
