@@ -241,6 +241,9 @@ body,
   height: 100%;
   background: #222;
 }
+.autoscroll .page-slot.lead-in .page-placeholder {
+  background: #fff;
+}
 .panel input[type='range'] {
   flex: 1;
   min-width: 120px;

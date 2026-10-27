@@ -445,6 +445,19 @@ export default function AutoScroll({
       onContextMenu={onContextMenu}
     >
       <div ref={stripRef} className="strip" style={{ height: layout.total }}>
+        {/* 先頭オフセットの領域。ページ 1 の切り落とした上余白をそのまま見せ、足りない分は白
+            （2026-10-27 user: 黒いままだと再生が始まったか分かりにくい） */}
+        {minY < 0 && (
+          <PageSlot
+            top={minY}
+            width={size.w}
+            height={-minY}
+            hidden={layout.hidden[0] + minY}
+            pageH={layout.pageH}
+            src={cacheRef.current.get(1) ?? null}
+            lead
+          />
+        )}
         {pages.map((p) => (
           <PageSlot
             key={p}
@@ -494,6 +507,7 @@ function PageSlot({
   hidden,
   pageH,
   src,
+  lead = false,
 }: {
   top: number;
   width: number;
@@ -501,6 +515,8 @@ function PageSlot({
   hidden: number;
   pageH: number;
   src: HTMLCanvasElement | null;
+  /** 先頭オフセット用: 描画前の下地も白にする */
+  lead?: boolean;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -513,7 +529,7 @@ function PageSlot({
     c.getContext('2d')!.drawImage(src, 0, 0);
   }, [src]);
   return (
-    <div className="page-slot" style={{ top, width, height }}>
+    <div className={lead ? 'page-slot lead-in' : 'page-slot'} style={{ top, width, height }}>
       {src ? (
         <canvas ref={ref} style={{ top: -hidden, height: pageH }} />
       ) : (
