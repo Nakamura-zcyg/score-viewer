@@ -7,6 +7,8 @@ export interface Settings {
   idleMinutes: number;
   /** 自動スクロールの上下タップで送る秒数 */
   nudgeSeconds: number;
+  /** 先頭から自動スクロールを始める時、下タップ何回分だけ手前（ページ 1 の上の空白）から動き出すか */
+  startOffsetTaps: number;
   /** 長押しと判定するまでの時間 (ms) */
   longPressMs: number;
   /** 半ページモードで上下が重なる割合 (%) */
@@ -18,6 +20,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   idleMinutes: 10,
   nudgeSeconds: 5,
+  startOffsetTaps: 2,
   longPressMs: 500,
   halfOverlapPercent: 15,
   cropPadPercent: 1.5,
@@ -50,6 +53,15 @@ export const SETTING_FIELDS: {
     max: 60,
     step: 1,
     note: '自動スクロールの速度 × この秒数ぶん動く',
+  },
+  {
+    key: 'startOffsetTaps',
+    label: '先頭から再生する時の手前オフセット',
+    unit: '回',
+    min: 0,
+    max: 10,
+    step: 1,
+    note: '下タップこの回数ぶん手前（ページ 1 の上の空白）から動き出す。0 で無効',
   },
   {
     key: 'longPressMs',

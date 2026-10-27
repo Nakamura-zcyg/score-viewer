@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronRight,
   LibraryBig,
   Maximize2,
@@ -984,12 +986,34 @@ export default function Viewer({ doc, onExit }: Props) {
             <section className="card">
               <h3>ページ</h3>
             <div className="row">
+              <button
+                className="btn icon"
+                onClick={() => {
+                  goToPage(1);
+                  setMenuOpen(false);
+                }}
+                aria-label="最初へ"
+                title="最初へ"
+              >
+                <ChevronsLeft size={24} />
+              </button>
               <button className="btn icon" onClick={prev} aria-label="前へ" title="前へ">
                 <ChevronLeft size={24} />
               </button>
               <span>{describe(pos)}</span>
               <button className="btn icon" onClick={next} aria-label="次へ" title="次へ">
                 <ChevronRight size={24} />
+              </button>
+              <button
+                className="btn icon"
+                onClick={() => {
+                  goToPage(doc.pageCount);
+                  setMenuOpen(false);
+                }}
+                aria-label="最後へ"
+                title="最後へ"
+              >
+                <ChevronsRight size={24} />
               </button>
             </div>
             <div className="row">

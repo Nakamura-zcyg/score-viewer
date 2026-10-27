@@ -147,7 +147,15 @@ export default function AutoScroll({
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const [, bump] = useState(0);
 
-  const clampY = useCallback((y: number, l: Layout) => Math.min(Math.max(y, 0), l.maxY), []);
+  // 帯の上限。ページ 1 の上に「下タップ n 回分」の空白を許し、先頭からの再生はそこから動き出す
+  // （2026-10-27 user: 先頭ちょうどからだと最初の段を弾く前に進んでしまい、2 回分手前がちょうどよい）
+  const minY = -(speed * settings.nudgeSeconds * settings.startOffsetTaps);
+  const minYRef = useRef(minY);
+  minYRef.current = minY;
+  const clampY = useCallback(
+    (y: number, l: Layout) => Math.min(Math.max(y, minYRef.current), l.maxY),
+    [],
+  );
 
   /** ページ内の位置（余白カット前の割合）→ 帯の中の y (px) */
   const posToStripY = useCallback((l: Layout, page: number, frac: number) => {
@@ -362,6 +370,17 @@ export default function AutoScroll({
   useEffect(() => () => {
     if (nudgeRef.current) cancelAnimationFrame(nudgeRef.current.raf);
   }, []);
+
+  // 先頭（ページ 1 の上端より前）で再生を始めた時は、手前オフセットの位置まで戻してから動き出す
+  const wasRunningRef = useRef(false);
+  useEffect(() => {
+    const started = running && !wasRunningRef.current;
+    wasRunningRef.current = running;
+    if (!started) return;
+    const y = yRef.current ?? 0;
+    const target = minYRef.current;
+    if (y <= 0 && target < 0) nudge(target - y);
+  }, [running, nudge]);
 
   const onPointerMove = (e: React.PointerEvent) => {
     const g = gRef.current;
