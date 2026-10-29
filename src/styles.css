@@ -746,35 +746,6 @@ body,
 }
 
 /* ---- メトロノーム ---- */
-.metro-flash {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: #fff;
-  opacity: 0;
-}
-.metro-flash.on {
-  animation: metro-flash 120ms ease-out;
-}
-.metro-flash.on.accent {
-  animation: metro-flash-accent 160ms ease-out;
-}
-@keyframes metro-flash {
-  from {
-    opacity: 0.18;
-  }
-  to {
-    opacity: 0;
-  }
-}
-@keyframes metro-flash-accent {
-  from {
-    opacity: 0.35;
-  }
-  to {
-    opacity: 0;
-  }
-}
 /* ---- 書き込み ---- */
 .annot-layer {
   position: absolute;
@@ -941,6 +912,9 @@ body,
 }
 .metro-dot.on {
   background: var(--accent);
+}
+.metro-dot.on.first {
+  background: #ffb300;
 }
 .panel .bpm-input {
   width: 4.5em;

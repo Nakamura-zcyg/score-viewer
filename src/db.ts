@@ -38,7 +38,8 @@ export interface MetronomeSettings {
   bpm: number;
   beats: number;
   accent: boolean;
-  flash: boolean;
+  /** 旧「画面を点滅」。2026-10-30 user「要らない」で機能は削除、保存済みデータ互換のため型だけ残す */
+  flash?: boolean;
   /** 自動スクロールの速度を BPM から出すときの 1 ページあたりの小節数 */
   measuresPerPage?: number;
 }

@@ -70,7 +70,7 @@ const BPM_MIN = 30;
 const BPM_MAX = 200; // 2026-10-30 user: バーの上限を 200 に
 /** 書き込みモードの 2 本指スクロール: ページモードではこの移動量で 1 回めくる (px) */
 const PAN_PAGE_PX = 80;
-const DEFAULT_METRONOME: MetronomeSettings = { bpm: 100, beats: 4, accent: true, flash: true };
+const DEFAULT_METRONOME: MetronomeSettings = { bpm: 100, beats: 4, accent: true };
 const METRO_BEATS = [2, 3, 4, 6];
 
 /** 繰りモード。auto は横向きなら half、縦向きなら page */
@@ -197,7 +197,6 @@ export default function Viewer({ doc, onExit }: Props) {
   const [metroRunning, setMetroRunning] = useState(false);
   const [metroBeat, setMetroBeat] = useState(0);
   const metronomeRef = useRef<Metronome | null>(null);
-  const flashRef = useRef<HTMLDivElement>(null);
   const metroRef = useRef(metro);
   metroRef.current = metro;
   const [pendingFrom, setPendingFrom] = useState<{ page: number; frac: number } | null>(null);
@@ -694,14 +693,7 @@ export default function Viewer({ doc, onExit }: Props) {
   useEffect(() => {
     const m = new Metronome(metroRef.current);
     m.onBeat = (beat) => {
-      setMetroBeat(beat);
-      const f = flashRef.current;
-      if (f && metroRef.current.flash) {
-        f.classList.remove('on', 'accent');
-        void f.offsetWidth; // 連続する拍でもアニメーションを再開させる
-        f.classList.add('on');
-        if (beat === 0 && metroRef.current.accent) f.classList.add('accent');
-      }
+      setMetroBeat(beat); // 拍の表示は右上バッジの点だけ（画面の点滅は 2026-10-30 user「要らない」で削除）
     };
     metronomeRef.current = m;
     return () => {
@@ -1073,7 +1065,6 @@ export default function Viewer({ doc, onExit }: Props) {
 
       <div className={'indicator' + (indicator ? ' show' : '')}>{indicator ?? ''}</div>
 
-      <div ref={flashRef} className="metro-flash" aria-hidden />
       {/* 左上: メニュー、右上: 再生／停止（スクロールモード）。長押し・2 本指の感度が悪い時の代替
           （2026-10-29 user 依頼） */}
       {!editing && pdf && (
@@ -1151,7 +1142,12 @@ export default function Viewer({ doc, onExit }: Props) {
           ♩={metro.bpm}
           <span className="metro-beats">
             {Array.from({ length: metro.beats }, (_, i) => (
-              <span key={i} className={'metro-dot' + (i === metroBeat ? ' on' : '')} />
+              <span
+                key={i}
+                className={
+                  'metro-dot' + (i === metroBeat ? ' on' : '') + (i === 0 && metro.accent ? ' first' : '')
+                }
+              />
             ))}
           </span>
         </button>
@@ -1550,14 +1546,6 @@ export default function Viewer({ doc, onExit }: Props) {
                     onChange={(e) => setMetro((m) => ({ ...m, accent: e.target.checked }))}
                   />{' '}
                   1 拍目を強く
-                </label>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={metro.flash}
-                    onChange={(e) => setMetro((m) => ({ ...m, flash: e.target.checked }))}
-                  />{' '}
-                  画面を点滅
                 </label>
               </div>
               {isScroll && (
