@@ -33,6 +33,8 @@ interface Props {
   onPrev: () => void;
   onNext: () => void;
   onDone: () => void;
+  /** 2 本指で動かした時。dy は指が下へ動いた px、null はジェスチャ終了 */
+  onPan: (dy: number | null) => void;
   pageLabel: string;
 }
 
@@ -53,6 +55,7 @@ export default function AnnotEditor({
   onPrev,
   onNext,
   onDone,
+  onPan,
   pageLabel,
 }: Props) {
   const [tool, setTool] = useState<Tool>('pen');
@@ -81,6 +84,19 @@ export default function AnnotEditor({
   // ---- ペン ----
   const strokeRef = useRef<{ id: number; s: Stroke; pageWidthPx: number } | null>(null);
   const draftRaf = useRef(0);
+  // 2 本指: 書くのをやめて画面を動かす（2026-10-30 user 依頼「ペンでも 2 本指スクロール」）
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const panRef = useRef<{ lastY: number } | null>(null);
+  const midY = () => {
+    const ys = Array.from(pointersRef.current.values()).map((p) => p.y);
+    return ys.reduce((a, b) => a + b, 0) / ys.length;
+  };
+  const cancelStroke = () => {
+    if (draftRaf.current) cancelAnimationFrame(draftRaf.current);
+    draftRaf.current = 0;
+    strokeRef.current = null;
+    onDraft(null);
+  };
   const pushDraft = (s: Stroke) => {
     if (draftRaf.current) return;
     draftRaf.current = requestAnimationFrame(() => {
@@ -98,8 +114,22 @@ export default function AnnotEditor({
     y: number;
     editing: TextNote | null;
     value: string;
+    /** 文字の大きさ（ページ高さに対する割合）。既存を編集中はその値から始める */
+    size: number;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // テキストのドラッグ移動（2026-10-30 user 依頼）。動かさずに離したら編集欄を開く
+  const dragRef = useRef<{
+    id: number;
+    note: TextNote;
+    startX: number;
+    startY: number;
+    pageWidthPx: number;
+    moved: boolean;
+    before: Annot[];
+    raf: number;
+    next: Annot[] | null;
+  } | null>(null);
   useEffect(() => {
     if (textBox) inputRef.current?.focus();
   }, [textBox]);
@@ -109,9 +139,10 @@ export default function AnnotEditor({
     const value = textBox.value.trim();
     const cur = annotsRef.current;
     if (textBox.editing) {
+      const id = textBox.editing.id;
       const next = value
-        ? cur.map((a) => (a.id === textBox.editing!.id ? { ...textBox.editing!, text: value } : a))
-        : cur.filter((a) => a.id !== textBox.editing!.id);
+        ? cur.map((a) => (a.id === id ? { ...(a as TextNote), text: value, size: textBox.size } : a))
+        : cur.filter((a) => a.id !== id);
       commit(next);
     } else if (value) {
       const t: TextNote = {
@@ -121,7 +152,7 @@ export default function AnnotEditor({
         x: round4(textBox.x),
         y: round4(textBox.y),
         text: value,
-        size: ANNOT_SIZES[sizeIdx].text,
+        size: textBox.size,
         color,
       };
       commit([...cur, t]);
@@ -140,6 +171,14 @@ export default function AnnotEditor({
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size >= 2) {
+      // 2 本目が触れたら書きかけは捨て、以後は 2 本指スクロール
+      cancelStroke();
+      panRef.current = { lastY: midY() };
+      return;
+    }
+    if (panRef.current) return;
     if (textBox) {
       commitText();
       return;
@@ -169,20 +208,84 @@ export default function AnnotEditor({
       eraseAt(p);
     } else {
       const existing = textAt(annotsRef.current, p.page, p.x, p.y, dims);
+      if (existing) {
+        // 既存の文字: まずドラッグ候補にする。動かさずに離したら編集欄
+        dragRef.current = {
+          id: e.pointerId,
+          note: existing,
+          startX: p.x,
+          startY: p.y,
+          pageWidthPx: p.pageWidthPx,
+          moved: false,
+          before: annotsRef.current,
+          raf: 0,
+          next: null,
+        };
+        return;
+      }
       setTextBox({
         left: e.clientX,
         top: e.clientY,
         page: p.page,
         x: p.x,
         y: p.y,
-        editing: existing,
-        value: existing?.text ?? '',
+        editing: null,
+        value: '',
+        size: ANNOT_SIZES[sizeIdx].text,
       });
     }
   };
 
+  const openTextBox = (note: TextNote, clientX: number, clientY: number) => {
+    setTextBox({
+      left: clientX,
+      top: clientY,
+      page: note.page,
+      x: note.x,
+      y: note.y,
+      editing: note,
+      value: note.text,
+      size: note.size,
+    });
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
     e.stopPropagation();
+    const pt = pointersRef.current.get(e.pointerId);
+    if (pt) {
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+    }
+    if (panRef.current) {
+      if (pointersRef.current.size >= 2) {
+        const y = midY();
+        const dy = y - panRef.current.lastY;
+        panRef.current.lastY = y;
+        if (dy !== 0) onPan(dy);
+      }
+      return;
+    }
+    const drag = dragRef.current;
+    if (drag && drag.id === e.pointerId) {
+      const p = toPage(e.clientX, e.clientY);
+      if (!p || p.page !== drag.note.page) return;
+      const dx = p.x - drag.startX;
+      const dy = p.y - drag.startY;
+      const pageHeightPx = (drag.pageWidthPx * dims.h) / dims.w;
+      if (!drag.moved && Math.hypot(dx * drag.pageWidthPx, dy * pageHeightPx) < 8) return;
+      drag.moved = true;
+      const x = round4(Math.min(Math.max(drag.note.x + dx, 0), 1));
+      const y = round4(Math.min(Math.max(drag.note.y + dy, 0), 1));
+      drag.next = drag.before.map((a) => (a.id === drag.note.id ? { ...drag.note, x, y } : a));
+      // 保存を伴うので 1 フレームに 1 回に抑える
+      if (!drag.raf) {
+        drag.raf = requestAnimationFrame(() => {
+          drag.raf = 0;
+          if (drag.next) onChange(drag.next);
+        });
+      }
+      return;
+    }
     const cur = strokeRef.current;
     if (!cur || cur.id !== e.pointerId) return;
     const p = toPage(e.clientX, e.clientY);
@@ -201,6 +304,28 @@ export default function AnnotEditor({
 
   const onPointerUp = (e: React.PointerEvent) => {
     e.stopPropagation();
+    pointersRef.current.delete(e.pointerId);
+    if (panRef.current) {
+      // 全部の指が離れるまでは描かない（残った 1 本で線が始まらないように）
+      if (pointersRef.current.size === 0) {
+        panRef.current = null;
+        onPan(null);
+      }
+      return;
+    }
+    const drag = dragRef.current;
+    if (drag && drag.id === e.pointerId) {
+      dragRef.current = null;
+      if (drag.raf) cancelAnimationFrame(drag.raf);
+      if (drag.moved) {
+        // 移動前の状態を取り消し履歴に積み、最終位置を確定
+        annotsRef.current = drag.before;
+        commit(drag.next ?? drag.before);
+      } else {
+        openTextBox(drag.note, e.clientX, e.clientY);
+      }
+      return;
+    }
     const cur = strokeRef.current;
     if (!cur || cur.id !== e.pointerId) return;
     strokeRef.current = null;
@@ -319,12 +444,25 @@ export default function AnnotEditor({
               if (e.key === 'Escape') setTextBox(null);
             }}
           />
+          <span className="group sizes">
+            {ANNOT_SIZES.map((s) => (
+              <button
+                key={s.name}
+                className={'btn small' + (textBox.size === s.text ? ' primary' : '')}
+                onClick={() => setTextBox({ ...textBox, size: s.text })}
+                aria-label={`文字の大きさ ${s.name}`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </span>
           <button className="btn small primary" onClick={commitText}>
             {textBox.editing ? '更新' : '置く'}
           </button>
           <button className="btn small" onClick={() => setTextBox(null)}>
             やめる
           </button>
+          {textBox.editing && <span className="annot-hint">文字は指でドラッグして動かせます</span>}
         </div>
       )}
     </div>

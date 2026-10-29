@@ -867,6 +867,15 @@ body,
   border-radius: 8px;
   touch-action: auto;
 }
+.annot-textbox {
+  flex-wrap: wrap;
+  max-width: calc(100vw - 16px);
+}
+.annot-textbox .annot-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
 .annot-textbox input {
   font: inherit;
   padding: 6px 8px;

@@ -44,6 +44,8 @@ interface Props {
   annots: Annot[];
   /** 書き込みモード用: 画面の点 → ページ内の割合 を返す関数をここに入れる */
   mapRef: MutableRefObject<((clientX: number, clientY: number) => PagePoint | null) | null>;
+  /** 書き込みモードの 2 本指スクロール: 指が下へ動いた px だけ帯を下げる関数をここに入れる */
+  panRef: MutableRefObject<((dy: number) => void) | null>;
   /** 読み位置の目安線を表示する（ジャンプ作成中） */
   showGuide: boolean;
 }
@@ -136,6 +138,7 @@ export default function AutoScroll({
   showGuide,
   annots,
   mapRef,
+  panRef,
 }: Props) {
   const settings = useSettings();
   const layout = useMemo(
@@ -234,10 +237,15 @@ export default function AutoScroll({
       if (fy < 0 || fy > 1) return null; // ページ 1 の上の空白など
       return { page, x: Math.min(Math.max(cx / size.w, 0), 1), y: fy, pageWidthPx: size.w };
     };
+    panRef.current = (dy) => {
+      yRef.current = clampY((yRef.current ?? 0) - dy, layoutRef.current);
+      apply();
+    };
     return () => {
       mapRef.current = null;
+      panRef.current = null;
     };
-  }, [mapRef, size.w]);
+  }, [mapRef, panRef, size.w, clampY, apply]);
 
   // ---- ジャンプ ----
   useEffect(() => {

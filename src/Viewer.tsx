@@ -62,12 +62,14 @@ const PREFETCH = 2;
 const LOAD_SLOW_MS = 8000;
 // 自動スクロールの速度範囲と既定値 (CSS px/秒)
 const SPEED_MIN = 5;
-const SPEED_MAX = 300;
+const SPEED_MAX = 200; // 2026-10-30 user: バーの上限を 200 に（細かく合わせやすく）
 const SPEED_DEFAULT = 40;
 const SPEED_STEP = 1.15; // ± ボタン・キーでの倍率
 // メトロノーム
 const BPM_MIN = 30;
-const BPM_MAX = 240;
+const BPM_MAX = 200; // 2026-10-30 user: バーの上限を 200 に
+/** 書き込みモードの 2 本指スクロール: ページモードではこの移動量で 1 回めくる (px) */
+const PAN_PAGE_PX = 80;
 const DEFAULT_METRONOME: MetronomeSettings = { bpm: 100, beats: 4, accent: true, flash: true };
 const METRO_BEATS = [2, 3, 4, 6];
 
@@ -101,10 +103,10 @@ function loadMode(): TurnMode {
 }
 
 function loadSpeed(doc: DocRecord): number {
-  if (doc.scrollSpeed) return doc.scrollSpeed;
+  if (doc.scrollSpeed) return Math.min(doc.scrollSpeed, SPEED_MAX); // 上限を下げた後の保存値は丸める
   try {
     const v = Number(localStorage.getItem(SPEED_KEY));
-    if (v >= SPEED_MIN && v <= SPEED_MAX) return v;
+    if (v >= SPEED_MIN) return Math.min(v, SPEED_MAX);
   } catch {
     /* 無視 */
   }
@@ -186,6 +188,7 @@ export default function Viewer({ doc, onExit }: Props) {
   const [draft, setDraft] = useState<Stroke | null>(null);
   const [editing, setEditing] = useState(false);
   const annotMapRef = useRef<((cx: number, cy: number) => PagePoint | null) | null>(null);
+  const annotPanRef = useRef<((dy: number) => void) | null>(null);
   // メトロノーム
   const [metro, setMetro] = useState<MetronomeSettings>(() => ({
     ...DEFAULT_METRONOME,
@@ -652,6 +655,17 @@ export default function Viewer({ doc, onExit }: Props) {
   runningRef.current = running;
   const speedRef = useRef(speed);
   speedRef.current = speed;
+  // 数値入力の下書き。入力途中で丸めると「1」と打った瞬間に下限へ飛ぶので、確定時（blur / Enter）にだけ反映する
+  const [speedDraft, setSpeedDraft] = useState<string | null>(null);
+  const [bpmDraft, setBpmDraft] = useState<string | null>(null);
+  const commitSpeedDraft = () => {
+    if (speedDraft === null) return;
+    const v = Number(speedDraft);
+    if (Number.isFinite(v) && speedDraft.trim() !== '') {
+      setSpeed(Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, v))));
+    }
+    setSpeedDraft(null);
+  };
   const toggleRunning = useCallback(() => {
     const next = !runningRef.current;
     runningRef.current = next;
@@ -922,6 +936,29 @@ export default function Viewer({ doc, onExit }: Props) {
     setEditing(true);
   }, []);
   const stopEv = (e: React.SyntheticEvent) => e.stopPropagation();
+  // 書き込みモードの 2 本指スクロール。スクロールモードは帯を動かし、ページモードは一定量動かしたら前後へ 1 回
+  const panAccRef = useRef({ acc: 0, fired: false });
+  const onAnnotPan = useCallback(
+    (dy: number | null) => {
+      if (isScroll) {
+        if (dy !== null) annotPanRef.current?.(dy);
+        return;
+      }
+      const st = panAccRef.current;
+      if (dy === null) {
+        st.acc = 0;
+        st.fired = false;
+        return;
+      }
+      if (st.fired) return;
+      st.acc += dy;
+      if (Math.abs(st.acc) < PAN_PAGE_PX) return;
+      st.fired = true;
+      if (st.acc > 0) prev();
+      else next();
+    },
+    [isScroll, prev, next],
+  );
 
   // ---- 右クリック／長押しメニュー抑止 ----
   useEffect(() => {
@@ -989,6 +1026,7 @@ export default function Viewer({ doc, onExit }: Props) {
           showGuide={pendingFrom !== null}
           annots={shownAnnots}
           mapRef={annotMapRef}
+          panRef={annotPanRef}
         />
       ) : (
         <>
@@ -1075,6 +1113,7 @@ export default function Viewer({ doc, onExit }: Props) {
           onPrev={prev}
           onNext={next}
           onDone={() => setEditing(false)}
+          onPan={onAnnotPan}
           pageLabel={describe(pos)}
         />
       )}
@@ -1229,7 +1268,19 @@ export default function Viewer({ doc, onExit }: Props) {
                 >
                   <Plus size={20} />
                 </button>
-                <span className="speed">{speed} px/秒</span>
+                <input
+                  type="number"
+                  className="bpm-input"
+                  inputMode="numeric"
+                  min={SPEED_MIN}
+                  max={SPEED_MAX}
+                  value={speedDraft ?? speed}
+                  onChange={(e) => setSpeedDraft(e.target.value)}
+                  onBlur={commitSpeedDraft}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                  aria-label="スクロール速度の数値"
+                />
+                <span className="muted-inline">px/秒</span>
               </div>
             )}
             {isScroll && (
@@ -1440,10 +1491,18 @@ export default function Viewer({ doc, onExit }: Props) {
                 <input
                   type="number"
                   className="bpm-input"
+                  inputMode="numeric"
                   min={BPM_MIN}
                   max={BPM_MAX}
-                  value={metro.bpm}
-                  onChange={(e) => setBpm(Number(e.target.value))}
+                  value={bpmDraft ?? metro.bpm}
+                  onChange={(e) => setBpmDraft(e.target.value)}
+                  onBlur={() => {
+                    if (bpmDraft !== null && bpmDraft.trim() !== '' && Number.isFinite(Number(bpmDraft))) {
+                      setBpm(Number(bpmDraft));
+                    }
+                    setBpmDraft(null);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                   aria-label="テンポの数値"
                 />
                 </div>
