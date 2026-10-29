@@ -798,6 +798,10 @@ body,
   z-index: 3;
   touch-action: none;
 }
+/* 自動スクロール中は楽譜の邪魔にならないよう薄くする（2026-10-30 user 依頼） */
+.corner-btn.faint {
+  opacity: 0.2;
+}
 .corner-btn.left {
   left: 8px;
 }

@@ -1079,7 +1079,7 @@ export default function Viewer({ doc, onExit }: Props) {
       {!editing && pdf && (
         <>
           <button
-            className="corner-btn left"
+            className={'corner-btn left' + (running ? ' faint' : '')}
             onClick={() => setMenuOpen(true)}
             onPointerDown={stopEv}
             onPointerUp={stopEv}
@@ -1089,7 +1089,7 @@ export default function Viewer({ doc, onExit }: Props) {
             <Menu size={22} />
           </button>
           <button
-            className="corner-btn left2"
+            className={'corner-btn left2' + (running ? ' faint' : '')}
             onClick={onExit}
             onPointerDown={stopEv}
             onPointerUp={stopEv}
@@ -1100,7 +1100,7 @@ export default function Viewer({ doc, onExit }: Props) {
           </button>
           {isScroll && (
             <button
-              className="corner-btn right"
+              className={'corner-btn right' + (running ? ' faint' : '')}
               onClick={toggleRunning}
               onPointerDown={stopEv}
               onPointerUp={stopEv}
