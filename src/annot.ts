@@ -36,14 +36,26 @@ export const ANNOT_COLORS = [
   { name: '赤', value: '#e53935' },
   { name: '青', value: '#1e88e5' },
   { name: '緑', value: '#2e7d32' },
-  { name: '黒', value: '#222222' },
+  { name: '黒', value: '#111111' },
 ];
 
-/** 太さ（ページ幅に対する割合）と、同じ段の文字の大きさ（ページ高さに対する割合） */
+/** ペンの太さ（ページ幅に対する割合） */
 export const ANNOT_SIZES = [
-  { name: '細', width: 0.003, text: 0.018 },
-  { name: '中', width: 0.006, text: 0.026 },
-  { name: '太', width: 0.012, text: 0.04 },
+  { name: '細', width: 0.003 },
+  { name: '中', width: 0.006 },
+  { name: '太', width: 0.012 },
+];
+
+/**
+ * 文字の大きさ（ページ高さに対する割合）。5 段階、特大は旧「太」(0.04) と同じ
+ * （2026-10-30 user「極小・小・中・大・特大、今の太が特大くらい」）。ボタンは大きさの違う「A」で示す
+ */
+export const TEXT_SIZES = [
+  { name: '極小', size: 0.012, iconPx: 9 },
+  { name: '小', size: 0.018, iconPx: 12 },
+  { name: '中', size: 0.026, iconPx: 15 },
+  { name: '大', size: 0.033, iconPx: 19 },
+  { name: '特大', size: 0.04, iconPx: 24 },
 ];
 
 export function newId(): string {

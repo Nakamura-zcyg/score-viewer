@@ -11,6 +11,7 @@ import {
 import {
   ANNOT_COLORS,
   ANNOT_SIZES,
+  TEXT_SIZES,
   hitTest,
   newId,
   round4,
@@ -58,9 +59,13 @@ export default function AnnotEditor({
   onPan,
   pageLabel,
 }: Props) {
-  const [tool, setTool] = useState<Tool>('pen');
+  // null = どのツールも選んでいない（1 本指では何も起きない）。選択中のアイコンをもう一度押すと解除
+  // （2026-10-30 user「ペンモードでアイコン再選択で解除」）
+  const [tool, setTool] = useState<Tool | null>('pen');
+  const pickTool = (t: Tool) => setTool((cur) => (cur === t ? null : t));
   const [color, setColor] = useState(ANNOT_COLORS[0].value);
   const [sizeIdx, setSizeIdx] = useState(1);
+  const [textSizeIdx, setTextSizeIdx] = useState(2);
   const undoRef = useRef<Annot[][]>([]);
   const [undoCount, setUndoCount] = useState(0);
   const annotsRef = useRef(annots);
@@ -116,6 +121,8 @@ export default function AnnotEditor({
     value: string;
     /** 文字の大きさ（ページ高さに対する割合）。既存を編集中はその値から始める */
     size: number;
+    /** 文字の色。編集欄でも変えられる（2026-10-30 user 依頼） */
+    color: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // テキストのドラッグ移動（2026-10-30 user 依頼）。動かさずに離したら編集欄を開く
@@ -141,7 +148,11 @@ export default function AnnotEditor({
     if (textBox.editing) {
       const id = textBox.editing.id;
       const next = value
-        ? cur.map((a) => (a.id === id ? { ...(a as TextNote), text: value, size: textBox.size } : a))
+        ? cur.map((a) =>
+            a.id === id
+              ? { ...(a as TextNote), text: value, size: textBox.size, color: textBox.color }
+              : a,
+          )
         : cur.filter((a) => a.id !== id);
       commit(next);
     } else if (value) {
@@ -153,7 +164,7 @@ export default function AnnotEditor({
         y: round4(textBox.y),
         text: value,
         size: textBox.size,
-        color,
+        color: textBox.color,
       };
       commit([...cur, t]);
     }
@@ -179,6 +190,7 @@ export default function AnnotEditor({
       return;
     }
     if (panRef.current) return;
+    if (tool === null) return;
     if (textBox) {
       commitText();
       return;
@@ -231,7 +243,8 @@ export default function AnnotEditor({
         y: p.y,
         editing: null,
         value: '',
-        size: ANNOT_SIZES[sizeIdx].text,
+        size: TEXT_SIZES[textSizeIdx].size,
+        color,
       });
     }
   };
@@ -246,6 +259,7 @@ export default function AnnotEditor({
       editing: note,
       value: note.text,
       size: note.size,
+      color: note.color,
     });
   };
 
@@ -349,7 +363,7 @@ export default function AnnotEditor({
 
   return (
     <div
-      className={`annot-editor tool-${tool}`}
+      className={`annot-editor tool-${tool ?? 'none'}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -360,7 +374,7 @@ export default function AnnotEditor({
         <div className="group">
           <button
             className={'btn icon' + (tool === 'pen' ? ' primary' : '')}
-            onClick={() => setTool('pen')}
+            onClick={() => pickTool('pen')}
             aria-label="ペン"
             title="ペン"
           >
@@ -368,7 +382,7 @@ export default function AnnotEditor({
           </button>
           <button
             className={'btn icon' + (tool === 'text' ? ' primary' : '')}
-            onClick={() => setTool('text')}
+            onClick={() => pickTool('text')}
             aria-label="テキスト"
             title="テキスト"
           >
@@ -376,7 +390,7 @@ export default function AnnotEditor({
           </button>
           <button
             className={'btn icon' + (tool === 'eraser' ? ' primary' : '')}
-            onClick={() => setTool('eraser')}
+            onClick={() => pickTool('eraser')}
             aria-label="消しゴム"
             title="消しゴム"
           >
@@ -395,18 +409,34 @@ export default function AnnotEditor({
             />
           ))}
         </div>
-        <div className="group sizes">
-          {ANNOT_SIZES.map((s, i) => (
-            <button
-              key={s.name}
-              className={'btn small' + (sizeIdx === i ? ' primary' : '')}
-              onClick={() => setSizeIdx(i)}
-              aria-label={`太さ ${s.name}`}
-            >
-              {s.name}
-            </button>
-          ))}
-        </div>
+        {tool === 'text' ? (
+          <div className="group sizes">
+            {TEXT_SIZES.map((s, i) => (
+              <button
+                key={s.name}
+                className={'btn small size-a' + (textSizeIdx === i ? ' primary' : '')}
+                onClick={() => setTextSizeIdx(i)}
+                aria-label={`文字の大きさ ${s.name}`}
+                title={s.name}
+              >
+                <span style={{ fontSize: s.iconPx }}>A</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="group sizes">
+            {ANNOT_SIZES.map((s, i) => (
+              <button
+                key={s.name}
+                className={'btn small' + (sizeIdx === i ? ' primary' : '')}
+                onClick={() => setSizeIdx(i)}
+                aria-label={`太さ ${s.name}`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="group">
           <button className="btn icon" onClick={undo} disabled={undoCount === 0} aria-label="取り消し" title="取り消し">
             <Undo2 size={20} />
@@ -444,15 +474,28 @@ export default function AnnotEditor({
               if (e.key === 'Escape') setTextBox(null);
             }}
           />
+          <span className="group colors">
+            {ANNOT_COLORS.map((c) => (
+              <button
+                key={c.value}
+                className={'swatch' + (textBox.color === c.value ? ' on' : '')}
+                style={{ background: c.value }}
+                onClick={() => setTextBox({ ...textBox, color: c.value })}
+                aria-label={`文字の色 ${c.name}`}
+                title={c.name}
+              />
+            ))}
+          </span>
           <span className="group sizes">
-            {ANNOT_SIZES.map((s) => (
+            {TEXT_SIZES.map((s) => (
               <button
                 key={s.name}
-                className={'btn small' + (textBox.size === s.text ? ' primary' : '')}
-                onClick={() => setTextBox({ ...textBox, size: s.text })}
+                className={'btn small size-a' + (textBox.size === s.size ? ' primary' : '')}
+                onClick={() => setTextBox({ ...textBox, size: s.size })}
                 aria-label={`文字の大きさ ${s.name}`}
+                title={s.name}
               >
-                {s.name}
+                <span style={{ fontSize: s.iconPx }}>A</span>
               </button>
             ))}
           </span>

@@ -848,14 +848,28 @@ body,
   gap: 4px;
   align-items: center;
 }
-.annot-toolbar .swatch {
+/* 文字の大きさ: 大きさの違う A を並べる（文字より見て分かる） */
+.btn.small.size-a {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-weight: 600;
+}
+/* 色の丸。黒が暗い背景に溶けないよう、常に薄い縁を付ける（選択中は白） */
+.annot-toolbar .swatch,
+.annot-textbox .swatch {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  border: 3px solid transparent;
+  border: 3px solid #666;
   padding: 0;
 }
-.annot-toolbar .swatch.on {
+.annot-toolbar .swatch.on,
+.annot-textbox .swatch.on {
   border-color: #fff;
 }
 .annot-toolbar .annot-page {
