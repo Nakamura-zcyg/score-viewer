@@ -990,7 +990,16 @@ export default function Viewer({ doc, onExit }: Props) {
     <div
       ref={containerRef}
       className="viewer"
-      style={{ '--corner-top': `${settings.cornerInsetPx}px` } as React.CSSProperties}
+      style={
+        {
+          '--corner-top': `${settings.cornerInsetPx}px`,
+          // 実際に見えている高さ。vh はアドレスバー等を含む大きい方の高さなので、全画面が解けると
+          // メニュー下段がブラウザのバーの裏に入る（2026-10-30 user 報告）
+          '--app-h': `${size.h}px`,
+          height: size.h,
+          bottom: 'auto',
+        } as React.CSSProperties
+      }
       {...pointerProps}
     >
       {isScroll && pdf && dims ? (
@@ -1165,6 +1174,14 @@ export default function Viewer({ doc, onExit }: Props) {
           <div className="panel menu">
             <div className="panel-header">
               <span className="title">{doc.name}</span>
+              <button
+                className="btn icon"
+                onClick={toggleFullscreen}
+                aria-label="全画面切替"
+                title="全画面切替"
+              >
+                <Maximize2 size={20} />
+              </button>
               <button
                 className="btn icon"
                 onClick={() => setMenuOpen(false)}

@@ -299,7 +299,10 @@ body,
 /* ビューアのメニュー: 画面幅に応じて 1〜3 列のカード。パネル内でスクロール */
 .panel.menu {
   width: min(96vw, 1120px);
+  /* --app-h は Viewer が実測の innerHeight を入れる。無い時は dvh（Chrome 108+）、さらに無ければ vh */
   max-height: 92vh;
+  max-height: 92dvh;
+  max-height: calc(var(--app-h, 100dvh) * 0.92);
   padding: 0;
   gap: 0;
   overflow: hidden;
