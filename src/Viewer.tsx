@@ -289,10 +289,31 @@ export default function Viewer({ doc, onExit }: Props) {
   }, [doc]);
 
   // ---- 画面サイズ変化 ----
+  // Android は回転・全画面切替の直後に resize が先に来て寸法が後から変わることがあるので、
+  // orientationchange / fullscreenchange / visualViewport の変化でも、少し置いて読み直す
   useEffect(() => {
-    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    let timer = 0;
+    const read = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+    };
+    const onResize = () => {
+      read();
+      clearTimeout(timer);
+      timer = window.setTimeout(read, 300);
+    };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    document.addEventListener('fullscreenchange', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      document.removeEventListener('fullscreenchange', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+    };
   }, []);
 
   // ---- 倍率が変わったらキャッシュを捨て、スライスを先頭に戻す ----
@@ -937,7 +958,12 @@ export default function Viewer({ doc, onExit }: Props) {
       };
 
   return (
-    <div ref={containerRef} className="viewer" {...pointerProps}>
+    <div
+      ref={containerRef}
+      className="viewer"
+      style={{ '--corner-top': `${settings.cornerInsetPx}px` } as React.CSSProperties}
+      {...pointerProps}
+    >
       {isScroll && pdf && dims ? (
         <AutoScroll
           pdf={pdf}

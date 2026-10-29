@@ -783,7 +783,8 @@ body,
 }
 .corner-btn {
   position: absolute;
-  top: 8px;
+  /* 設定の距離 + 端末の安全領域（切り欠き等）。全画面中に被るステータスバーは設定で逃がす */
+  top: calc(var(--corner-top, 8px) + env(safe-area-inset-top, 0px));
   width: 44px;
   height: 44px;
   border-radius: 10px;
@@ -878,7 +879,7 @@ body,
 
 .metro-badge {
   position: absolute;
-  top: 8px;
+  top: calc(var(--corner-top, 8px) + env(safe-area-inset-top, 0px));
   right: 8px;
   display: flex;
   align-items: center;

@@ -9,6 +9,8 @@ export interface Settings {
   nudgeSeconds: number;
   /** 先頭から自動スクロールを始める時、下タップ何回分だけ手前（ページ 1 の上の空白）から動き出すか */
   startOffsetTaps: number;
+  /** 画面の角のボタン（メニュー・再生停止）の上端からの距離 (px) */
+  cornerInsetPx: number;
   /** 長押しと判定するまでの時間 (ms) */
   longPressMs: number;
   /** 半ページモードで上下が重なる割合 (%) */
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   longPressMs: 500,
   halfOverlapPercent: 15,
   cropPadPercent: 1.5,
+  cornerInsetPx: 8,
 };
 
 /** 設定画面で使う項目の説明と範囲 */
@@ -89,6 +92,15 @@ export const SETTING_FIELDS: {
     max: 10,
     step: 0.5,
     note: 'ページ高さに対する割合。前後のページ分が合わさって段間になる',
+  },
+  {
+    key: 'cornerInsetPx',
+    label: '角のボタンの上端からの距離',
+    unit: 'px',
+    min: 0,
+    max: 160,
+    step: 4,
+    note: '全画面中にステータスバーが被って押せない時は大きくする',
   },
 ];
 
