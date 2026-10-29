@@ -90,6 +90,8 @@ function progressText(p: SyncProgress): string {
       return `ダウンロード ${p.current}/${p.total}: ${p.name}`;
     case 'videos':
       return '動画の一覧を同期中…';
+    case 'annots':
+      return '書き込みを同期中…';
     case 'done':
       return '完了';
   }
@@ -312,14 +314,16 @@ export default function Library({ onOpen, onOpenVideo, onOpenSettings, error, on
         ? `、Drive で削除済みのため上げなかったもの ${r.skippedMissing}`
         : '';
       const vids = r.videosUploaded ? `、動画 ${r.videosUploaded}` : '';
-      return `アップロード完了: ${r.uploaded} 件、名前変更 ${r.renamed}${vids}${skipped}`;
+      const ann = r.annotsUploaded ? `、書き込み ${r.annotsUploaded}` : '';
+      return `アップロード完了: ${r.uploaded} 件、名前変更 ${r.renamed}${vids}${ann}${skipped}`;
     });
 
   const onDownload = () =>
     runSync('ダウンロード', async () => {
       const r = await downloadFromDrive(onProgress);
       const vids = r.videosDownloaded ? `、動画 ${r.videosDownloaded}` : '';
-      return `ダウンロード完了: ${r.downloaded} 件、名前変更 ${r.renamed}${vids}`;
+      const ann = r.annotsDownloaded ? `、書き込み ${r.annotsDownloaded}` : '';
+      return `ダウンロード完了: ${r.downloaded} 件、名前変更 ${r.renamed}${vids}${ann}`;
     });
 
   const driveOn = drive.isConfigured();

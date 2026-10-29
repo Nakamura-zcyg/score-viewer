@@ -13,16 +13,18 @@ import {
   listVideos,
   markDriveMissing,
   markVideoSynced,
+  setAnnots,
   setName,
   upsertVideoFromRemote,
   type DocMeta,
   type VideoMeta,
 } from './db.ts';
+import type { Annot } from './annot.ts';
 import * as drive from './drive.ts';
 import { countPages } from './pdf.ts';
 
 export interface SyncProgress {
-  phase: 'auth' | 'list' | 'upload' | 'download' | 'videos' | 'done';
+  phase: 'auth' | 'list' | 'upload' | 'download' | 'videos' | 'annots' | 'done';
   current?: number;
   total?: number;
   name?: string;
@@ -35,6 +37,8 @@ export interface UploadResult {
   skippedMissing: number;
   /** videos.json に新しく載せた動画の数 */
   videosUploaded: number;
+  /** annotations.json を更新した楽譜の数 */
+  annotsUploaded: number;
 }
 
 export interface DownloadResult {
@@ -42,6 +46,8 @@ export interface DownloadResult {
   renamed: number;
   /** videos.json から取り込んだ動画の数 */
   videosDownloaded: number;
+  /** annotations.json から取り込んだ楽譜の数 */
+  annotsDownloaded: number;
 }
 
 // ---- 動画一覧の同期: フォルダ内の videos.json 1 つに全端末の一覧を合流させる ----
@@ -144,6 +150,56 @@ export async function removeVideoFromDrive(videoId: string): Promise<void> {
   await drive.uploadJson(folderId, VIDEOS_FILE, id, { version: 1, videos: next } as VideosFile);
 }
 
+// ---- 書き込みの同期: フォルダ内の annotations.json 1 つに、Drive のファイル id ごとの書き込みを置く ----
+// PDF 本体とは別ファイルにして原本を汚さない。名前変更にも影響されないよう id で引く。
+// 楽譜ごとに更新時刻の新しい方が勝つ（端末間で同じ楽譜に別々に書くと、古い方は負けて消える）
+const ANNOTS_FILE = 'annotations.json';
+
+interface AnnotsFile {
+  version: 1;
+  docs: Record<string, { updated: number; annots: Annot[] }>;
+}
+
+async function readAnnotsFile(folderId: string): Promise<{ id: string | null; docs: AnnotsFile['docs'] }> {
+  const id = await drive.findFile(folderId, ANNOTS_FILE);
+  if (!id) return { id: null, docs: {} };
+  try {
+    const j = await drive.downloadJson<AnnotsFile>(id);
+    return { id, docs: j.docs && typeof j.docs === 'object' ? j.docs : {} };
+  } catch {
+    return { id, docs: {} };
+  }
+}
+
+/** 端末の新しい書き込みを annotations.json に合流させる。戻り値は更新した楽譜数 */
+async function uploadAnnots(folderId: string, local: DocMeta[]): Promise<number> {
+  const { id, docs } = await readAnnotsFile(folderId);
+  let n = 0;
+  for (const d of local) {
+    if (!d.driveId || d.driveMissing || !d.annotsUpdated) continue;
+    const r = docs[d.driveId];
+    if (r && r.updated >= d.annotsUpdated) continue;
+    docs[d.driveId] = { updated: d.annotsUpdated, annots: d.annots ?? [] };
+    n++;
+  }
+  if (n > 0) await drive.uploadJson(folderId, ANNOTS_FILE, id, { version: 1, docs } as AnnotsFile);
+  return n;
+}
+
+/** annotations.json の新しい書き込みを端末に取り込む。戻り値は更新した楽譜数 */
+async function downloadAnnots(folderId: string, local: DocMeta[]): Promise<number> {
+  const { docs } = await readAnnotsFile(folderId);
+  let n = 0;
+  for (const d of local) {
+    if (!d.driveId) continue;
+    const r = docs[d.driveId];
+    if (!r || !(r.updated > (d.annotsUpdated ?? 0))) continue;
+    await setAnnots(d.id, Array.isArray(r.annots) ? r.annots : [], r.updated);
+    n++;
+  }
+  return n;
+}
+
 const stripPdf = (n: string) => n.replace(/\.pdf$/i, '');
 const withPdf = (n: string) => `${n}.pdf`;
 
@@ -175,7 +231,13 @@ async function snapshot(onProgress: (p: SyncProgress) => void): Promise<Snapshot
 }
 
 export async function uploadToDrive(onProgress: (p: SyncProgress) => void): Promise<UploadResult> {
-  const result: UploadResult = { uploaded: 0, renamed: 0, skippedMissing: 0, videosUploaded: 0 };
+  const result: UploadResult = {
+    uploaded: 0,
+    renamed: 0,
+    skippedMissing: 0,
+    videosUploaded: 0,
+    annotsUploaded: 0,
+  };
   const { folderId, remote, remoteById, local } = await snapshot(onProgress);
   const linkedIds = new Set(
     local.filter((d) => d.driveId && remoteById.has(d.driveId)).map((d) => d.driveId as string),
@@ -213,7 +275,11 @@ export async function uploadToDrive(onProgress: (p: SyncProgress) => void): Prom
     await setName(d.id, d.name, false);
   }
 
-  // 3) 動画一覧
+  // 3) 書き込み（上で付いたリンクを含めるため一覧を取り直す）
+  onProgress({ phase: 'annots' });
+  result.annotsUploaded = await uploadAnnots(folderId, await listDocs());
+
+  // 4) 動画一覧
   onProgress({ phase: 'videos' });
   result.videosUploaded = await uploadVideos(folderId);
 
@@ -224,7 +290,7 @@ export async function uploadToDrive(onProgress: (p: SyncProgress) => void): Prom
 export async function downloadFromDrive(
   onProgress: (p: SyncProgress) => void,
 ): Promise<DownloadResult> {
-  const result: DownloadResult = { downloaded: 0, renamed: 0, videosDownloaded: 0 };
+  const result: DownloadResult = { downloaded: 0, renamed: 0, videosDownloaded: 0, annotsDownloaded: 0 };
   const { folderId, remote, remoteById, local } = await snapshot(onProgress);
   const linkedIds = new Set(local.map((d) => d.driveId).filter(Boolean) as string[]);
 
@@ -256,7 +322,11 @@ export async function downloadFromDrive(
     result.downloaded++;
   }
 
-  // 3) 動画一覧
+  // 3) 書き込み（今降ろした楽譜も含めるため一覧を取り直す）
+  onProgress({ phase: 'annots' });
+  result.annotsDownloaded = await downloadAnnots(folderId, await listDocs());
+
+  // 4) 動画一覧
   onProgress({ phase: 'videos' });
   result.videosDownloaded = await downloadVideos(folderId);
 

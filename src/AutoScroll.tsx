@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import type { Jump } from './db.ts';
 import { renderPage, type PageCrop, type PDFDocumentProxy } from './pdf.ts';
 import { useSettings } from './settings.ts';
+import AnnotLayer from './AnnotLayer.tsx';
+import type { Annot, PagePoint } from './annot.ts';
 
 // 自動スクロール表示。ページを横幅いっぱいで縦に並べた帯を CSS transform で動かす。
 // 毎フレーム canvas を描き直さないので古い端末でも滑らか。見えている前後だけ描画する。
@@ -38,6 +40,10 @@ interface Props {
   onJumped: (j: Jump) => void;
   /** 今の読み位置（画面上部から READ_LINE の位置）を書き込む */
   readPosRef: MutableRefObject<{ page: number; frac: number }>;
+  /** 書き込み（書きかけの線も含めて表示する） */
+  annots: Annot[];
+  /** 書き込みモード用: 画面の点 → ページ内の割合 を返す関数をここに入れる */
+  mapRef: MutableRefObject<((clientX: number, clientY: number) => PagePoint | null) | null>;
   /** 読み位置の目安線を表示する（ジャンプ作成中） */
   showGuide: boolean;
 }
@@ -128,6 +134,8 @@ export default function AutoScroll({
   onJumped,
   readPosRef,
   showGuide,
+  annots,
+  mapRef,
 }: Props) {
   const settings = useSettings();
   const layout = useMemo(
@@ -214,6 +222,22 @@ export default function AutoScroll({
     // startPage は初期位置にだけ使う
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout, apply]);
+
+  // ---- 書き込みモード用の座標変換: 画面の点 → ページ内の割合（余白カット前のページ基準） ----
+  useEffect(() => {
+    mapRef.current = (cx, cy) => {
+      const l = layoutRef.current;
+      const y = (yRef.current ?? 0) + cy;
+      const page = pageAt(l, y);
+      const i = page - 1;
+      const fy = (y - l.tops[i] + l.hidden[i]) / l.pageH;
+      if (fy < 0 || fy > 1) return null; // ページ 1 の上の空白など
+      return { page, x: Math.min(Math.max(cx / size.w, 0), 1), y: fy, pageWidthPx: size.w };
+    };
+    return () => {
+      mapRef.current = null;
+    };
+  }, [mapRef, size.w]);
 
   // ---- ジャンプ ----
   useEffect(() => {
@@ -455,6 +479,9 @@ export default function AutoScroll({
             hidden={layout.hidden[0] + minY}
             pageH={layout.pageH}
             src={cacheRef.current.get(1) ?? null}
+            page={1}
+            annots={annots}
+            dims={dims}
             lead
           />
         )}
@@ -467,6 +494,9 @@ export default function AutoScroll({
             hidden={layout.hidden[p - 1]}
             pageH={layout.pageH}
             src={cacheRef.current.get(p) ?? null}
+            page={p}
+            annots={annots}
+            dims={dims}
           />
         ))}
         {jumps.map((j, i) => (
@@ -507,8 +537,14 @@ function PageSlot({
   hidden,
   pageH,
   src,
+  page,
+  annots,
+  dims,
   lead = false,
 }: {
+  page: number;
+  annots: Annot[];
+  dims: { w: number; h: number };
   top: number;
   width: number;
   height: number;
@@ -535,6 +571,12 @@ function PageSlot({
       ) : (
         <div className="page-placeholder" />
       )}
+      <AnnotLayer
+        annots={annots}
+        page={page}
+        dims={dims}
+        style={{ position: 'absolute', left: 0, top: -hidden, width: '100%', height: pageH }}
+      />
     </div>
   );
 }

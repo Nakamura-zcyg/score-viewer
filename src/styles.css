@@ -280,6 +280,7 @@ body,
 .overlay {
   position: absolute;
   inset: 0;
+  z-index: 6;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
@@ -774,6 +775,107 @@ body,
     opacity: 0;
   }
 }
+/* ---- 書き込み ---- */
+.annot-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+.corner-btn {
+  position: absolute;
+  top: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid #555;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ddd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  z-index: 3;
+  touch-action: none;
+}
+.corner-btn.left {
+  left: 8px;
+}
+.corner-btn.right {
+  right: 8px;
+}
+.metro-badge.shifted {
+  right: 60px;
+}
+.annot-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  touch-action: none;
+}
+.annot-editor.tool-pen {
+  cursor: crosshair;
+}
+.annot-editor.tool-text {
+  cursor: text;
+}
+.annot-editor.tool-eraser {
+  cursor: cell;
+}
+.annot-toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: rgba(20, 20, 20, 0.92);
+  border-bottom: 1px solid #333;
+  touch-action: auto;
+}
+.annot-toolbar .group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.annot-toolbar .swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  padding: 0;
+}
+.annot-toolbar .swatch.on {
+  border-color: #fff;
+}
+.annot-toolbar .annot-page {
+  min-width: 4em;
+  text-align: center;
+  font-size: 14px;
+}
+.annot-textbox {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px;
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  touch-action: auto;
+}
+.annot-textbox input {
+  font: inherit;
+  padding: 6px 8px;
+  width: 12em;
+  background: #111;
+  color: var(--fg);
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+
 .metro-badge {
   position: absolute;
   top: 8px;

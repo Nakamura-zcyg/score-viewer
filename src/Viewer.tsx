@@ -6,13 +6,16 @@ import {
   ChevronRight,
   LibraryBig,
   Maximize2,
+  Menu,
   Minus,
   Pause,
+  PenLine,
   Play,
   Plus,
   X,
 } from 'lucide-react';
 import {
+  setAnnots as saveAnnots,
   setCropOverride,
   setCropPad,
   setCrops as saveCrops,
@@ -36,6 +39,9 @@ import {
   type PDFDocumentProxy,
 } from './pdf.ts';
 import AutoScroll, { READ_LINE } from './AutoScroll.tsx';
+import AnnotLayer from './AnnotLayer.tsx';
+import AnnotEditor from './AnnotEditor.tsx';
+import type { Annot, PagePoint, Stroke } from './annot.ts';
 import { useWakeLock } from './useWakeLock.ts';
 import { useSettings } from './settings.ts';
 
@@ -175,6 +181,11 @@ export default function Viewer({ doc, onExit }: Props) {
   const [jump, setJump] = useState<{ page: number; seq: number } | null>(null);
   // 反復ジャンプ
   const [jumps, setJumpsState] = useState<Jump[]>(doc.jumps ?? []);
+  // 書き込み（ペン・テキスト）。draft は書きかけの線
+  const [annots, setAnnotsState] = useState<Annot[]>(doc.annots ?? []);
+  const [draft, setDraft] = useState<Stroke | null>(null);
+  const [editing, setEditing] = useState(false);
+  const annotMapRef = useRef<((cx: number, cy: number) => PagePoint | null) | null>(null);
   // メトロノーム
   const [metro, setMetro] = useState<MetronomeSettings>(() => ({
     ...DEFAULT_METRONOME,
@@ -848,6 +859,49 @@ export default function Viewer({ doc, onExit }: Props) {
   // ---- 画面消灯防止（1 時間無操作で解除。自動スクロール中は無操作に数えない） ----
   useWakeLock(running || metroRunning);
 
+  // ---- 書き込み ----
+  const shownAnnots = useMemo(() => (draft ? [...annots, draft] : annots), [annots, draft]);
+  const changeAnnots = useCallback(
+    (next: Annot[]) => {
+      setAnnotsState(next);
+      saveAnnots(doc.id, next, Date.now()).catch(() => undefined);
+    },
+    [doc.id],
+  );
+  // ページモードでページが画面のどこに描かれているか（draw の計算と同じ）
+  const pageRect = useMemo(() => {
+    if (!layout) return null;
+    const offset = layout.slices[Math.min(pos.slice, layout.slices.length - 1)] ?? 0;
+    const left = (size.w - layout.pageW) / 2;
+    const top = layout.pageH <= size.h ? (size.h - layout.pageH) / 2 : -offset;
+    return { left, top, width: layout.pageW, height: layout.pageH };
+  }, [layout, pos.slice, size]);
+  const toPage = useCallback(
+    (cx: number, cy: number): PagePoint | null => {
+      if (isScroll) return annotMapRef.current?.(cx, cy) ?? null;
+      const r = pageRect;
+      if (!r) return null;
+      const x = (cx - r.left) / r.width;
+      const y = (cy - r.top) / r.height;
+      if (x < -0.02 || x > 1.02 || y < -0.02 || y > 1.02) return null;
+      return {
+        page: posRef.current.page,
+        x: Math.min(Math.max(x, 0), 1),
+        y: Math.min(Math.max(y, 0), 1),
+        pageWidthPx: r.width,
+      };
+    },
+    [isScroll, pageRect],
+  );
+  // 演奏中は編集しない（user 決定）ので、入る時に自動スクロールを止める
+  const startEditing = useCallback(() => {
+    runningRef.current = false;
+    setRunning(false);
+    setMenuOpen(false);
+    setEditing(true);
+  }, []);
+  const stopEv = (e: React.SyntheticEvent) => e.stopPropagation();
+
   // ---- 右クリック／長押しメニュー抑止 ----
   useEffect(() => {
     const block = (e: Event) => e.preventDefault();
@@ -871,9 +925,10 @@ export default function Viewer({ doc, onExit }: Props) {
       ? `${sliceCount} 分割・上下タップ`
       : '左右タップ';
 
-  const pointerProps = isScroll
-    ? {}
-    : {
+  const pointerProps =
+    isScroll || editing
+      ? {}
+      : {
         onPointerDown,
         onPointerMove,
         onPointerUp,
@@ -906,9 +961,21 @@ export default function Viewer({ doc, onExit }: Props) {
           onJumped={onJumped}
           readPosRef={readPosRef}
           showGuide={pendingFrom !== null}
+          annots={shownAnnots}
+          mapRef={annotMapRef}
         />
       ) : (
-        <canvas ref={canvasRef} className="page-canvas" />
+        <>
+          <canvas ref={canvasRef} className="page-canvas" />
+          {dims && pageRect && (
+            <AnnotLayer
+              annots={shownAnnots}
+              page={pos.page}
+              dims={dims}
+              style={{ position: 'absolute', ...pageRect }}
+            />
+          )}
+        </>
       )}
 
       {analyzing && <div className="analyzing">{analyzing}</div>}
@@ -943,9 +1010,52 @@ export default function Viewer({ doc, onExit }: Props) {
       <div className={'indicator' + (indicator ? ' show' : '')}>{indicator ?? ''}</div>
 
       <div ref={flashRef} className="metro-flash" aria-hidden />
+      {/* 左上: メニュー、右上: 再生／停止（スクロールモード）。長押し・2 本指の感度が悪い時の代替
+          （2026-10-29 user 依頼） */}
+      {!editing && pdf && (
+        <>
+          <button
+            className="corner-btn left"
+            onClick={() => setMenuOpen(true)}
+            onPointerDown={stopEv}
+            onPointerUp={stopEv}
+            aria-label="メニュー"
+            title="メニュー"
+          >
+            <Menu size={22} />
+          </button>
+          {isScroll && (
+            <button
+              className="corner-btn right"
+              onClick={toggleRunning}
+              onPointerDown={stopEv}
+              onPointerUp={stopEv}
+              aria-label={running ? '停止' : '再生'}
+              title={running ? '停止' : '再生'}
+            >
+              {running ? <Pause size={22} /> : <Play size={22} />}
+            </button>
+          )}
+        </>
+      )}
+
+      {editing && dims && (
+        <AnnotEditor
+          annots={annots}
+          dims={dims}
+          toPage={toPage}
+          onChange={changeAnnots}
+          onDraft={setDraft}
+          onPrev={prev}
+          onNext={next}
+          onDone={() => setEditing(false)}
+          pageLabel={describe(pos)}
+        />
+      )}
+
       {metroRunning && (
         <button
-          className="metro-badge"
+          className={'metro-badge' + (isScroll ? ' shifted' : '')}
           onClick={toggleMetronome}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
@@ -1256,6 +1366,17 @@ export default function Viewer({ doc, onExit }: Props) {
                 )}
               </details>
             )}
+            </section>
+            <section className="card">
+              <h3>書き込み</h3>
+              <div className="row">
+                <button className="btn with-icon" onClick={startEditing}>
+                  <PenLine size={20} /> 書き込みモード
+                </button>
+                <span className="muted-inline">
+                  {annots.length > 0 ? `${annots.length} 件（Drive にも同期）` : 'ペン・テキスト・消しゴム'}
+                </span>
+              </div>
             </section>
             <section className="card metro-section">
               <div className="row">

@@ -1,5 +1,7 @@
 // IndexedDB: store "docs" に PDF 本体とメタデータを保存する
 
+import type { Annot } from './annot.ts';
+
 export interface DocMeta {
   id: number;
   name: string;
@@ -26,6 +28,10 @@ export interface DocMeta {
   jumps?: Jump[];
   /** メトロノームの設定（楽譜ごと） */
   metronome?: MetronomeSettings;
+  /** 書き込み（ペン・テキスト）。座標はページに対する割合（annot.ts） */
+  annots?: Annot[];
+  /** annots を最後に変えた時刻 (ms)。Drive の annotations.json との新旧比較に使う */
+  annotsUpdated?: number;
 }
 
 export interface MetronomeSettings {
@@ -243,6 +249,13 @@ export function setCropOverride(
 export function setMetronome(id: number, m: MetronomeSettings): Promise<void> {
   return patch(id, (r) => {
     r.metronome = m;
+  });
+}
+
+export function setAnnots(id: number, annots: Annot[], updated: number): Promise<void> {
+  return patch(id, (r) => {
+    r.annots = annots;
+    r.annotsUpdated = updated;
   });
 }
 
