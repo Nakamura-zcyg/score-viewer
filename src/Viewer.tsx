@@ -1098,6 +1098,17 @@ export default function Viewer({ doc, onExit }: Props) {
           >
             <LibraryBig size={22} />
           </button>
+          {/* 書き込みモード。スクロールモードでは再生ボタンの左、それ以外では右端（2026-10-30 user 依頼） */}
+          <button
+            className={'corner-btn ' + (isScroll ? 'right2' : 'right') + (running ? ' faint' : '')}
+            onClick={startEditing}
+            onPointerDown={stopEv}
+            onPointerUp={stopEv}
+            aria-label="書き込みモード"
+            title="書き込みモード"
+          >
+            <PenLine size={22} />
+          </button>
           {isScroll && (
             <button
               className={'corner-btn right' + (running ? ' faint' : '')}
@@ -1130,7 +1141,7 @@ export default function Viewer({ doc, onExit }: Props) {
 
       {metroRunning && (
         <button
-          className={'metro-badge' + (isScroll ? ' shifted' : '')}
+          className={'metro-badge ' + (isScroll ? 'shifted2' : 'shifted')}
           onClick={toggleMetronome}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}

@@ -811,8 +811,14 @@ body,
 .corner-btn.right {
   right: 8px;
 }
+.corner-btn.right2 {
+  right: 60px;
+}
 .metro-badge.shifted {
   right: 60px;
+}
+.metro-badge.shifted2 {
+  right: 112px;
 }
 .annot-editor {
   position: absolute;
