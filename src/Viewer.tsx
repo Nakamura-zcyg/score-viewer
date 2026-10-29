@@ -1088,6 +1088,16 @@ export default function Viewer({ doc, onExit }: Props) {
           >
             <Menu size={22} />
           </button>
+          <button
+            className="corner-btn left2"
+            onClick={onExit}
+            onPointerDown={stopEv}
+            onPointerUp={stopEv}
+            aria-label="ライブラリへ戻る"
+            title="ライブラリへ戻る"
+          >
+            <LibraryBig size={22} />
+          </button>
           {isScroll && (
             <button
               className="corner-btn right"
@@ -1657,9 +1667,6 @@ export default function Viewer({ doc, onExit }: Props) {
             <div className="menu-footer">
               <button className="btn with-icon" onClick={toggleFullscreen}>
                 <Maximize2 size={20} /> 全画面切替
-              </button>
-              <button className="btn with-icon" onClick={onExit}>
-                <LibraryBig size={20} /> ライブラリ
               </button>
               <button className="btn primary with-icon" onClick={() => setMenuOpen(false)}>
                 <X size={20} /> 閉じる

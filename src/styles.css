@@ -801,6 +801,9 @@ body,
 .corner-btn.left {
   left: 8px;
 }
+.corner-btn.left2 {
+  left: 60px;
+}
 .corner-btn.right {
   right: 8px;
 }
