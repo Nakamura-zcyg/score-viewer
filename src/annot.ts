@@ -47,15 +47,17 @@ export const ANNOT_SIZES = [
 ];
 
 /**
- * 文字の大きさ（ページ高さに対する割合）。5 段階、特大は旧「太」(0.04) と同じ
- * （2026-10-30 user「極小・小・中・大・特大、今の太が特大くらい」）。ボタンは大きさの違う「A」で示す
+ * 文字の大きさ（ページ高さに対する割合）。5 段階、ボタンは大きさの違う「A」で示す。
+ * 2026-10-30 user「極小・小・中・大・特大、今の太が特大くらい」で 1.2〜4% にした後、
+ * 同日 user「全体的に基準を 1 段階下げて」で各段を 1 つずつ下げた（特大＝旧「大」、中＝旧「小」）。
+ * 置き済みの文字は保存値のまま変わらない
  */
 export const TEXT_SIZES = [
-  { name: '極小', size: 0.012, iconPx: 9 },
-  { name: '小', size: 0.018, iconPx: 12 },
-  { name: '中', size: 0.026, iconPx: 15 },
-  { name: '大', size: 0.033, iconPx: 19 },
-  { name: '特大', size: 0.04, iconPx: 24 },
+  { name: '極小', size: 0.008, iconPx: 9 },
+  { name: '小', size: 0.012, iconPx: 12 },
+  { name: '中', size: 0.018, iconPx: 15 },
+  { name: '大', size: 0.026, iconPx: 19 },
+  { name: '特大', size: 0.033, iconPx: 24 },
 ];
 
 export function newId(): string {
